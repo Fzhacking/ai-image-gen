@@ -1,0 +1,11 @@
+# Install PyTorch with CUDA first (RTX 3090 / any recent NVIDIA card):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu126
+# Then:
+#   pip install -r requirements.txt
+diffusers>=0.31
+transformers>=4.45
+accelerate>=1.0
+safetensors
+gradio>=5.0
+spandrel>=0.4
+# torchvision: pip install torchvision --index-url https://download.pytorch.org/whl/cu126

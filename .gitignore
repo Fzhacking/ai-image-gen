@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Model weights (downloaded separately)
+models/*.pth
+models/*.safetensors
+models/*.bin
+
+# Generated images and local database
+outputs/
+generations.db
+
+# OS / editor
+.DS_Store
+Thumbs.db
