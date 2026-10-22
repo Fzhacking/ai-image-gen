@@ -1,0 +1,14 @@
+# Normalise text, never touch binaries
+* text=auto
+*.py text
+*.md text
+*.txt text
+*.yml text
+*.bat text eol=crlf
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.safetensors binary
+*.pth binary
+*.db binary
