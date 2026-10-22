@@ -77,7 +77,8 @@ weighting. On a 24 GB card it runs with CPU offload (~20 GB download).
 text and complex layouts. To fit a 24 GB card it runs with the transformer quantised to 4-bit and the
 Lightning 8-step LoRA attached, so no negative prompt or guidance. The first `model qwen` downloads
 about 48 GB and then spends several minutes quantising; the 4-bit copy is cached under `models\cache\`
-so later loads are much faster. Stop other GPU programs first: it needs most of the card.
+so later loads take about 90 s. On the RTX 3090 an image takes 13 to 14 s at 18 GB peak VRAM. Stop other
+GPU programs first: it needs most of the card.
 
 **FLUX.1 [schnell]** is gated on Hugging Face. Accept the terms at
 https://huggingface.co/black-forest-labs/FLUX.1-schnell, run `.venv\Scripts\huggingface-cli login`,

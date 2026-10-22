@@ -14,10 +14,13 @@ The first use of a model downloads it into the Hugging Face cache.
 """
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # before torch is imported
 
 import models
 
@@ -112,6 +115,7 @@ def main() -> None:
         path = args.out / f"{stamp}_seed{seed}.png"
         image.save(path)
         print(f"Saved {path}  ({elapsed:.1f}s)")
+        manager.release_cache()
 
     peak = torch.cuda.max_memory_allocated() / 1024**3
     print(f"\nDone. Peak VRAM used: {peak:.1f} GB")

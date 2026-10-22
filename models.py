@@ -418,6 +418,12 @@ class ModelManager:
             spec.source, transformer=transformer, text_encoder=text_encoder, torch_dtype=dtype,
         )
         pipe.to(self.device)
+        # 17.6 GB sit resident; keep the VAE decode peak small so the whole run stays under 24 GB.
+        for name in ("enable_slicing", "enable_tiling"):
+            try:
+                getattr(pipe.vae, name)()
+            except Exception:
+                pass
 
         # Lightning recipe from lightx2v: exponential time shift of log(3), 8 steps, no CFG.
         pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(pipe.scheduler.config, **{
@@ -543,6 +549,15 @@ class ModelManager:
             return t
 
         return pad(a), pad(b)
+
+    HEAVY_FAMILIES = ("qwen", "zimage", "flux")
+
+    def release_cache(self) -> None:
+        """Return freed activations to the driver after an image. Matters for the big flow models, where the
+        resident weights leave only a few GB of headroom and fragmentation can push Windows into paging VRAM."""
+        if self.spec and self.spec.family in self.HEAVY_FAMILIES:
+            import torch
+            torch.cuda.empty_cache()
 
     def generation_kwargs(self, steps: int, guidance: float, width: int, height: int, generator, callback=None) -> dict:
         kw = dict(num_inference_steps=steps, guidance_scale=guidance, width=width, height=height, generator=generator)

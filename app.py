@@ -30,6 +30,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Less fragmentation in the CUDA allocator; set before torch is imported. Keeps the 20B models under 24 GB.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import gradio as gr
 import pandas as pd
 import torch
@@ -506,6 +509,7 @@ def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] 
         reports.append(details_markdown(rec))
         records.append({"id": rec["id"], "image_path": str(path), "upscaled_path": rec.get("upscaled_path"),
                         "width": s.width, "height": s.height})
+        MANAGER.release_cache()
 
     return (
         images,
