@@ -58,8 +58,12 @@ already loaded. Switching between SDXL models takes about 26 s; Z-Image takes lo
 fine-tunes) into `models\checkpoints\`. It appears in the model list under its file name after a
 restart. Files with `turbo`, `lightning` or `hyper` in the name get 6-step defaults.
 
-**LoRAs:** put SDXL LoRA files in `models\loras\` and reference them in the prompt the usual way:
-`<lora:name:0.8>` (weight optional). Several can be stacked.
+**LoRAs:** two starter SDXL LoRAs are set up in `models\loras\` (fetch them on a fresh clone with
+`.\.venv\Scripts\python.exe models.py fetch-loras`): **Pixel Art XL** (`<lora:pixel-art-xl>`,
+say "pixel art" in the prompt) and **Papercut** (`<lora:papercut>`, say "papercut"). Tick them in the
+LoRAs box (applied at 0.8) or write the tag in the prompt with any weight, for example
+`<lora:pixel-art-xl:0.9>`. Several can be stacked. Add more by dropping `.safetensors` files into the
+folder and restarting. They apply to SDXL-family models; Z-Image and FLUX need LoRAs trained for them.
 
 **Prompt weighting (SDXL family):** `(glowing sword:1.3)` or `(glowing sword)++` emphasises,
 `(word:0.7)` or `(word)--` de-emphasises. Prompts longer than 77 tokens are no longer cut off.

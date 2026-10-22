@@ -427,7 +427,7 @@ def sec_workflows():
         bullets([
             "Copy an SDXL LoRA file to models\\loras\\, for example pixel-style.safetensors, and write `<lora:pixel-style:0.8>` anywhere in the prompt. Several tags can be stacked; the weight is optional and defaults to 1.",
             "Copy an SDXL checkpoint (a single .safetensors file, as distributed on Civitai) to models\\checkpoints\\ and restart the app. It appears in the Model box and can be named in the prompt by its file name. Files with turbo, lightning or hyper in the name get 6-step defaults.",
-            "LoRAs apply to SDXL-family models only. A LoRA that cannot be found is reported in the notes under the details report rather than failing the generation.",
+            "Two LoRAs are included: pixel-art-xl and papercut. Tick them in the LoRAs box or tag them in the prompt. SDXL LoRAs apply to SDXL-family models; a LoRA that cannot be found or does not fit the loaded model is reported in the notes under the details report rather than failing the generation.",
         ]),
         H2("4.5 Producing 4K and 8K output", "s4-5"),
         P("**From the prompt:** include 4k, 8k, 2k or an exact size such as 3840x2160. The parser sets an upscale "
@@ -634,8 +634,13 @@ def sec_models():
             "If compel ever fails on a prompt, the pipeline's own encoder is used and a line is printed; generation never fails because of weighting.",
         ]),
         H2("6.5 LoRAs", "s6-5"),
+        P("Two starter SDXL LoRAs are set up by `python models.py fetch-loras` (they are not kept in git): "
+          "**Pixel Art XL** (nerijs/pixel-art-xl, 163 MB, trigger word \"pixel art\") and **Papercut** "
+          "(TheLastBen/Papercut_SDXL, 325 MB, trigger word \"papercut\"). Tick them in the LoRAs box under the "
+          "negative prompt, where they apply at weight 0.8, or write the tag in the prompt with any weight."),
         bullets([
-            "Files in models/loras/ are matched by name, ignoring case and punctuation: `<lora:Pixel_Style:0.8>` finds pixel-style.safetensors.",
+            "Files in models/loras/ are matched by name, ignoring case and punctuation: `<lora:Pixel_Art_XL:0.9>` finds pixel-art-xl.safetensors.",
+            "LoRAs trained for SDXL apply to every SDXL-family model. Z-Image and FLUX accept LoRAs trained for them; an SDXL LoRA requested on those models is reported as incompatible in the notes and skipped.",
             "Each LoRA is loaded into the resident pipeline once and then activated or deactivated per request with its weight; swapping models reloads them on demand.",
             "LoRAs patch the UNet and the text encoders, so they interact correctly with weighting.",
             "Weights are clamped to the range -2 to 2.",
@@ -1164,6 +1169,7 @@ def sec_appendix():
             ["List history / one record / statistics", "db.py  |  db.py 4  |  db.py stats"],
             ["Parser self-test", "prompt_parser.py"],
             ["Model registry status", "models.py"],
+            ["Fetch the starter LoRAs", "models.py fetch-loras"],
             ["GPU telemetry dump", "gpu_info.py"],
             ["Full system telemetry as JSON", "sysinfo.py"],
             ["Log in to Hugging Face (for FLUX)", ".\\.venv\\Scripts\\huggingface-cli login"],

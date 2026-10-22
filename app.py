@@ -50,6 +50,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 DEFAULT_NEGATIVE = "blurry, low quality, deformed, watermark, text"
 UPSCALE_CHOICES = [("2K (2560 px)", "2k"), ("4K (3840 px)", "4k"), ("8K (7680 px)", "8k")]
+UI_LORA_WEIGHT = 0.8  # weight for LoRAs ticked in the LoRAs box; prompt tags can set any weight
 
 HELP = """
 **Write everything in the prompt.** The app reads these hints:
@@ -288,6 +289,12 @@ def pick_model(s: Settings, choice: str) -> tuple[ModelSpec, str | None]:
     if choice and choice != "auto":
         return models.resolve(choice), None
     current = MANAGER.spec or models.resolve(STARTUP_MODEL)
+    if s.loras and current.family != "sdxl":
+        # LoRAs in models/loras/ are SDXL LoRAs: switch to the best SDXL model on disk so they take effect.
+        for key in ("juggernaut", "realvis", "sdxl"):
+            cand = models.resolve(key)
+            if models.is_downloaded(cand):
+                return cand, f"LoRAs need an SDXL model: using {cand.name}"
     suited = models.model_for_style(s.style)
     # Z-Image and FLUX handle every style themselves; Auto only swaps between SDXL-family specialists.
     if suited and suited.key != current.key and current.family == "sdxl":
@@ -299,11 +306,20 @@ def pick_model(s: Settings, choice: str) -> tuple[ModelSpec, str | None]:
 
 # ----------------------------------------------------------------------------- generate tab
 
-def preview(prompt: str, choice: str) -> str:
+def add_ui_loras(s: Settings, selected: list[str] | None) -> None:
+    """LoRAs ticked in the LoRAs box join the prompt's <lora:...> tags (prompt tags win on weight)."""
+    named = {models._slug(n) for n, _ in s.loras}
+    for name in selected or []:
+        if models._slug(name) not in named:
+            s.loras.append((name, UI_LORA_WEIGHT))
+
+
+def preview(prompt: str, choice: str, loras_ui: list[str] | None = None) -> str:
     """Live 'interpreted as' line shown under the prompt box."""
     if not prompt.strip():
         return ""
     s = parse(prompt)
+    add_ui_loras(s, loras_ui)
     try:
         spec, note = pick_model(s, choice)
     except gr.Error as e:
@@ -312,8 +328,8 @@ def preview(prompt: str, choice: str) -> str:
     if note:
         s.notes.append(note)
     line = f"**Will generate:** {s.summary()}  ·  model **{spec.name}**"
-    if not spec.negative and s.loras:
-        s.notes.append("LoRAs are ignored by FLUX")
+    if spec.family != "sdxl" and s.loras:
+        s.notes.append(f"SDXL LoRAs do not apply to {spec.name}; pick an SDXL model or a LoRA trained for it")
     if s.notes:
         line += f"  \n<small>{' · '.join(s.notes)}</small>"
     return line
@@ -387,11 +403,12 @@ def upscale_record(rec: dict, target_px: int, exact_size: tuple[int, int] | None
     }
 
 
-def generate(prompt: str, negative: str, model_choice: str, progress=gr.Progress()):
+def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] | None = None, progress=gr.Progress()):
     if not prompt.strip():
         raise gr.Error("Please enter a prompt.")
 
     s = parse(prompt)
+    add_ui_loras(s, loras_ui)
     spec, auto_note = pick_model(s, model_choice)
     if auto_note:
         s.notes.append(auto_note)
@@ -792,6 +809,11 @@ with gr.Blocks(title="Frazile AI · Image Studio", fill_width=True) as demo:
                     )
                     loaded_md = gr.Markdown(loaded_line(), elem_classes=["fz-loaded"])
                     negative = gr.Textbox(label="Negative prompt (what to avoid)", lines=2, value=DEFAULT_NEGATIVE)
+                    lora_choice = gr.Dropdown(
+                        models.available_loras(), multiselect=True, label="LoRAs (SDXL models)",
+                        info=f"Applied at weight {UI_LORA_WEIGHT:g}; write <lora:name:1.2> in the prompt for another weight. "
+                             "Files in models/loras/. Pixel Art XL wants 'pixel art' in the prompt; Papercut wants 'papercut'.",
+                    )
                     with gr.Row():
                         run = gr.Button("Generate", variant="primary", size="lg", scale=3)
                         clear = gr.Button("Clear", variant="secondary", size="lg", scale=1, min_width=90)
@@ -812,11 +834,13 @@ with gr.Blocks(title="Frazile AI · Image Studio", fill_width=True) as demo:
             last_records = gr.State([])
             selected_index = gr.State(None)
 
-            prompt.change(preview, [prompt, model_choice], interpreted, show_progress="hidden")
-            model_choice.change(preview, [prompt, model_choice], interpreted, show_progress="hidden")
+            preview_inputs = [prompt, model_choice, lora_choice]
+            prompt.change(preview, preview_inputs, interpreted, show_progress="hidden")
+            model_choice.change(preview, preview_inputs, interpreted, show_progress="hidden")
+            lora_choice.change(preview, preview_inputs, interpreted, show_progress="hidden")
             gen_outputs = [gallery, details, last_records, selected_index, upscale_bar, upscale_note, loaded_md]
-            run.click(generate, [prompt, negative, model_choice], gen_outputs)
-            prompt.submit(generate, [prompt, negative, model_choice], gen_outputs)
+            run.click(generate, [prompt, negative, model_choice, lora_choice], gen_outputs)
+            prompt.submit(generate, [prompt, negative, model_choice, lora_choice], gen_outputs)
             clear.click(clear_all, None, [prompt, gallery, details, last_records, selected_index, upscale_bar, upscale_note, interpreted])
             gallery.select(on_select, [last_records], [selected_index, upscale_note])
             upscale_btn.click(upscale, [last_records, selected_index, upscale_target],
@@ -829,6 +853,8 @@ with gr.Blocks(title="Frazile AI · Image Studio", fill_width=True) as demo:
                     ["a knight in silver armour in a misty forest, (glowing blue sword:1.3), model realvis"],
                     ["anime girl with a red umbrella in the rain, tall, 2 images"],
                     ["a corgi astronaut floating in space, 3d render, square, seed 7, using dreamshaper"],
+                    ["pixel art of a knight guarding a castle gate, <lora:pixel-art-xl:0.9>, model juggernaut, seed 3"],
+                    ["papercut landscape of mountains and a lake at sunset, <lora:papercut>, model juggernaut, 16:9"],
                     ["watercolor of a paris street cafe, tall, quick"],
                 ],
                 inputs=[prompt],

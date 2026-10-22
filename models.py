@@ -324,11 +324,11 @@ class ModelManager:
             )
             pipe.enable_model_cpu_offload()
             return pipe
-        except GatedRepoError as e:
+        except (GatedRepoError, OSError) as e:  # diffusers wraps the 401 in an OSError
             raise RuntimeError(
-                "FLUX.1 [schnell] is gated on Hugging Face. Accept the terms at "
+                "FLUX.1 [schnell] is gated on Hugging Face and no login token is stored. Accept the terms at "
                 "https://huggingface.co/black-forest-labs/FLUX.1-schnell, then run "
-                "`.venv\\Scripts\\huggingface-cli login` and try again."
+                "`.venv\\Scripts\\huggingface-cli login` and try again. Until then use Z-Image Turbo or an SDXL model."
             ) from e
 
     def _load_zimage(self, spec: ModelSpec, log=print):
@@ -388,8 +388,8 @@ class ModelManager:
     def apply_loras(self, loras: list[tuple[str, float]], log=print) -> list[str]:
         """Activate the given (name, weight) LoRAs; returns a note per LoRA for the record."""
         notes: list[str] = []
-        if self.spec and self.spec.family != "sdxl" and loras:
-            log("LoRAs are only applied to SDXL-family models; ignoring.")
+        if loras and not hasattr(self.pipe, "load_lora_weights"):
+            notes.append(f"{self.spec.name} does not support LoRAs; ignored")
             loras = []
         names, weights = [], []
         for name, weight in loras:
@@ -400,7 +400,12 @@ class ModelManager:
             adapter = _slug(path.stem).replace("-", "_")
             if adapter not in self._loaded_loras:
                 log(f"Loading LoRA {path.name} ...")
-                self.pipe.load_lora_weights(str(path), adapter_name=adapter)
+                try:
+                    self.pipe.load_lora_weights(str(path), adapter_name=adapter)
+                except Exception as e:  # an SDXL LoRA on Z-Image, or a broken file
+                    log(f"LoRA {path.name} not loaded: {e}")
+                    notes.append(f"LoRA {path.stem} is not compatible with {self.spec.name}; ignored")
+                    continue
                 self._loaded_loras[adapter] = path
             names.append(adapter)
             weights.append(weight)
@@ -480,7 +485,36 @@ class ModelManager:
         return kw
 
 
+STARTER_LORAS = {
+    # file name in models/loras/  ->  (Hugging Face repo, file in repo, trigger word)
+    "pixel-art-xl.safetensors": ("nerijs/pixel-art-xl", "pixel-art-xl.safetensors", "pixel art"),
+    "papercut.safetensors": ("TheLastBen/Papercut_SDXL", "papercut.safetensors", "papercut"),
+}
+
+
+def fetch_starter_loras(log=print) -> list[Path]:
+    """Download the two SDXL LoRAs the documentation refers to (they are not kept in git)."""
+    import shutil
+    from huggingface_hub import hf_hub_download
+    LORAS_DIR.mkdir(parents=True, exist_ok=True)
+    got = []
+    for name, (repo, filename, trigger) in STARTER_LORAS.items():
+        dst = LORAS_DIR / name
+        if dst.exists():
+            log(f"{name} already present")
+        else:
+            log(f"Downloading {repo}/{filename} ...")
+            shutil.copy(hf_hub_download(repo, filename), dst)
+        got.append(dst)
+        log(f"  {name}  trigger word: '{trigger}'  use: <lora:{dst.stem}:0.8>")
+    return got
+
+
 if __name__ == "__main__":
+    import sys as _sys
+    if len(_sys.argv) > 1 and _sys.argv[1] == "fetch-loras":
+        fetch_starter_loras()
+        raise SystemExit(0)
     for m in all_models():
         where = "downloaded" if is_downloaded(m) else f"not downloaded (~{m.download_gb:g} GB)"
         print(f"{m.key:12} {m.name:26} {m.steps:>3} steps  cfg {m.guidance:<4g} {where}")

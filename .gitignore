@@ -7,6 +7,8 @@ __pycache__/
 models/*.pth
 models/*.safetensors
 models/*.bin
+models/checkpoints/*.safetensors
+models/loras/*.safetensors
 
 # Generated images and local database
 outputs/
