@@ -5,6 +5,11 @@ Run:
     .venv/Scripts/python.exe app.py
 Then open http://127.0.0.1:7860 in your browser.
 
+Environment (used by the Docker image, optional otherwise):
+    GRADIO_SERVER_NAME   bind address, default 127.0.0.1 (0.0.0.0 inside Docker)
+    GRADIO_SERVER_PORT   port, default 7860
+    FRAZILE_NO_BROWSER   set to 1 to not open a browser tab on start
+
 Everything is controlled from the prompt. Examples:
     "a cozy cabin in a snowy forest, 16:9, 4k"
     "portrait of a cyberpunk samurai, 3 images, seed 42"
@@ -13,13 +18,13 @@ Everything is controlled from the prompt. Examples:
     "neon street at night using flux"
 See prompt_parser.py for the full list of understood words and models.py for the models.
 
-After a generation an Upscale bar appears under the results: pick 2K / 4K / 8K and upscale the
-selected image (or all of them) with Real-ESRGAN. Upscales are recorded on the same database row.
-
-Every generation is recorded in generations.db (SQLite) with its settings, timings and GPU
-telemetry. The History tab browses that database.
+Tabs:
+    Generate   prompt, model, results, upscale bar (2K/4K/8K with Real-ESRGAN after generation)
+    History    every generation from generations.db with its settings, timings and GPU telemetry
+    Admin      live system panel: GPU, CPU, memory, storage, network, power, software, app
 """
 
+import os
 import random
 import time
 from datetime import datetime
@@ -33,8 +38,10 @@ from PIL import Image
 import db
 import gpu_info
 import models
+import sysinfo
 from models import ModelManager, ModelSpec
 from prompt_parser import Settings, parse
+from sysinfo import human_bytes
 from upscaler import TARGETS, Upscaler
 
 STARTUP_MODEL = "sdxl"
@@ -80,9 +87,13 @@ YELLOW = gr.themes.Color(
 BG, SURFACE, SURFACE_2, BORDER, TEXT, MUTED = "#0B0F1A", "#141A2B", "#0F1422", "#232B40", "#F5F7FF", "#9AA3B8"
 GRADIENT = "linear-gradient(90deg, #EC4899 0%, #F59E0B 55%, #FACC15 100%)"
 GRADIENT_HOVER = "linear-gradient(90deg, #F472B6 0%, #FBBF24 55%, #FDE047 100%)"
+# Status colours are reserved for state and always come with an icon and a word, never colour alone.
+STATUS = {"good": ("#0ca30c", "●", "OK"), "warning": ("#fab219", "▲", "Warm"),
+          "serious": ("#ec835a", "▲", "Hot"), "critical": ("#d03b3b", "■", "Critical")}
 
 
 def build_theme() -> gr.themes.Base:
+    import inspect
     theme = gr.themes.Base(
         primary_hue=PINK,
         secondary_hue=YELLOW,
@@ -91,7 +102,6 @@ def build_theme() -> gr.themes.Base:
         font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "ui-monospace", "monospace"],
         radius_size=gr.themes.sizes.radius_lg,
     )
-    import inspect
     valid = set(inspect.signature(gr.themes.Base.set).parameters)
     both = {}  # apply every value to light and dark mode so the studio is always dark
     for key, value in {
@@ -148,46 +158,65 @@ def build_theme() -> gr.themes.Base:
 
 
 CSS = f"""
-.gradio-container {{ max-width: 1440px !important; }}
+.gradio-container {{ max-width: none !important; padding: 0 28px 28px !important; }}
 footer {{ display: none !important; }}
 
-.fz-header {{ display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
-              padding: 10px 4px 18px; border-bottom: 1px solid {BORDER}; margin-bottom: 14px; }}
+.fz-header {{ display: flex; align-items: center; justify-content: space-between; gap: 16px;
+              padding: 14px 4px 14px; border-bottom: 1px solid {BORDER}; margin-bottom: 12px; }}
 .fz-brand {{ display: flex; align-items: center; gap: 12px; }}
-.fz-mark {{ width: 40px; height: 40px; border-radius: 12px; background: {GRADIENT};
+.fz-mark {{ width: 42px; height: 42px; border-radius: 12px; background: {GRADIENT};
             box-shadow: 0 8px 24px -8px rgba(236,72,153,.7); display: grid; place-items: center;
-            font-weight: 900; font-size: 20px; color: #1A0A12; letter-spacing: -.04em; }}
+            font-weight: 900; font-size: 21px; color: #1A0A12; letter-spacing: -.04em; }}
 .fz-logo {{ font-weight: 800; font-size: 26px; letter-spacing: -.02em; line-height: 1; color: {TEXT}; }}
 .fz-logo span {{ background: {GRADIENT}; -webkit-background-clip: text; background-clip: text; color: transparent; }}
-.fz-tag {{ color: {MUTED}; font-size: 13px; margin-top: 4px; }}
-.fz-sys {{ color: {MUTED}; font-size: 12px; font-family: var(--font-mono); text-align: right; line-height: 1.6; }}
-.fz-sys b {{ color: #FACC15; font-weight: 600; }}
+.fz-tag {{ color: {MUTED}; font-size: 13px; margin-top: 5px; }}
+.fz-sys {{ display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }}
+.fz-pill {{ font-family: var(--font-mono); font-size: 11.5px; color: {MUTED}; border: 1px solid {BORDER};
+            background: {SURFACE}; border-radius: 999px; padding: 5px 10px; white-space: nowrap; }}
+.fz-pill b {{ color: #FACC15; font-weight: 600; }}
 
 .fz-interp {{ border-left: 3px solid #EC4899; background: #17122A; border-radius: 10px;
               padding: 8px 12px; font-size: 13px; margin: 2px 0 8px; }}
 .fz-interp p {{ margin: 0; }}
 .fz-interp small {{ color: {MUTED}; }}
+.fz-loaded {{ font-size: 12px; color: {MUTED}; margin: -4px 0 4px 2px; }}
+.fz-loaded b {{ color: #F9A8D4; font-weight: 600; }}
 
 .fz-upscale {{ border: 1px dashed #3A2C4A; border-radius: 14px; padding: 10px 12px;
                background: linear-gradient(180deg, #151225 0%, {SURFACE} 100%); margin-top: 8px; }}
-.fz-upscale .fz-hint {{ color: {MUTED}; font-size: 12px; }}
+.fz-hint {{ color: {MUTED}; font-size: 12px; }}
 
 button.primary {{ font-weight: 700; letter-spacing: .01em;
                   box-shadow: 0 10px 28px -10px rgba(236,72,153,.75); transition: transform .08s ease; }}
 button.primary:hover {{ transform: translateY(-1px); }}
 button.secondary {{ font-weight: 600; }}
-.fz-ghost {{ background: transparent !important; border: 1px solid #3A2C4A !important; color: #FACC15 !important; }}
 
 .tabs > .tab-nav button.selected, .tab-nav button.selected {{ color: #FACC15 !important; border-color: #EC4899 !important; }}
 .prose h3 {{ color: #FACC15; }}
+.prose h4 {{ color: #F9A8D4; margin-top: 4px; }}
 .prose table th {{ color: #F9A8D4; }}
 .prose code {{ background: #1C1530; color: #FDE68A; border: 1px solid #3A2C4A; }}
 .gallery-item, .thumbnail-item {{ border-radius: 12px !important; }}
 .progress-bar {{ background: {GRADIENT} !important; }}
+
+/* admin panel */
+.fz-tiles {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 10px; margin: 4px 0 12px; }}
+.fz-tile {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 14px; padding: 12px 14px 10px; min-height: 92px; }}
+.fz-tile .l {{ font-size: 12px; color: {MUTED}; }}
+.fz-tile .v {{ font-size: 24px; font-weight: 600; color: {TEXT}; line-height: 1.15; margin-top: 4px; }}
+.fz-tile .v small {{ font-size: 13px; color: {MUTED}; font-weight: 500; margin-left: 2px; }}
+.fz-tile .s {{ font-size: 11.5px; color: {MUTED}; margin-top: 4px; }}
+.fz-tile .st {{ font-size: 11.5px; font-weight: 600; margin-top: 4px; }}
+.fz-meter {{ height: 6px; border-radius: 3px; background: #3B2238; margin-top: 8px; overflow: hidden; }}
+.fz-meter > div {{ height: 100%; border-radius: 3px; background: #EC4899; }}
+.fz-cores {{ display: flex; gap: 3px; margin-top: 8px; align-items: flex-end; height: 22px; }}
+.fz-cores > div {{ flex: 1; background: #3B2238; border-radius: 2px; position: relative; height: 100%; }}
+.fz-cores > div > div {{ position: absolute; bottom: 0; left: 0; right: 0; background: #EC4899; border-radius: 2px; }}
+.fz-admin-head {{ display: flex; justify-content: space-between; align-items: center; color: {MUTED}; font-size: 12px; }}
 """
 
 
-def header_html(static_gpu: dict, upscaler_name: str) -> str:
+def header_html(static_gpu: dict) -> str:
     return f"""
 <div class="fz-header">
   <div class="fz-brand">
@@ -198,8 +227,10 @@ def header_html(static_gpu: dict, upscaler_name: str) -> str:
     </div>
   </div>
   <div class="fz-sys">
-    <b>{static_gpu['gpu_name']}</b> · {static_gpu['vram_total_gb']} GB VRAM<br>
-    CUDA {static_gpu['cuda_version']} · torch {static_gpu['torch_version']} · {upscaler_name}
+    <span class="fz-pill"><b>{static_gpu['gpu_name']}</b> · {static_gpu['vram_total_gb']} GB</span>
+    <span class="fz-pill">CUDA {static_gpu['cuda_version']}</span>
+    <span class="fz-pill">torch {static_gpu['torch_version']}</span>
+    <span class="fz-pill">diffusers {static_gpu['diffusers_version']}</span>
   </div>
 </div>"""
 
@@ -234,6 +265,13 @@ STATIC_GPU = gpu_info.static_info()
 MODEL_CHOICES = [("Auto (pick by style words in the prompt)", "auto")] + [
     (f"{m.name}  -  {m.description}", m.key) for m in models.all_models()
 ]
+
+
+def loaded_line() -> str:
+    spec = MANAGER.spec
+    if not spec:
+        return ""
+    return f"Loaded now: **{spec.name}** · {MANAGER.scheduler_name} · upscaler {UPSCALER.name}"
 
 
 # ----------------------------------------------------------------------------- model selection
@@ -327,7 +365,7 @@ def details_markdown(rec: dict) -> str:
 
 
 def upscale_record(rec: dict, target_px: int, exact_size: tuple[int, int] | None = None) -> dict:
-    """Upscale one generation's native image to target_px long side; save, record in the DB, return fields."""
+    """Upscale one generation's native image to target_px long side; save and return the DB fields."""
     img = Image.open(rec["image_path"]).convert("RGB")
     up_img, up_info = UPSCALER.upscale_to(img, target_px)
     if exact_size:
@@ -336,7 +374,7 @@ def upscale_record(rec: dict, target_px: int, exact_size: tuple[int, int] | None
         up_img = up_img.crop((left, top, left + min(tw, up_img.width), top + min(th, up_img.height)))
     up_path = Path(rec["image_path"]).with_name(f"{Path(rec['image_path']).stem}_{target_px}px.png")
     up_img.save(up_path)
-    fields = {
+    return {
         "upscale_target": target_px,
         "upscaled_width": up_img.width,
         "upscaled_height": up_img.height,
@@ -346,7 +384,6 @@ def upscale_record(rec: dict, target_px: int, exact_size: tuple[int, int] | None
         "upscale_passes": up_info["passes"],
         "upscaler": up_info["upscaler"],
     }
-    return fields
 
 
 def generate(prompt: str, negative: str, model_choice: str, progress=gr.Progress()):
@@ -439,10 +476,9 @@ def generate(prompt: str, negative: str, model_choice: str, progress=gr.Progress
         final_path = str(path)
         if s.upscale_to:
             progress(1.0, desc=f"Upscaling image {i + 1}/{s.count} to {s.upscale_to} px")
-            up = upscale_record(rec, s.upscale_to, s.exact_size)
-            rec.update(up)
+            rec.update(upscale_record(rec, s.upscale_to, s.exact_size))
             rec["vram_peak_gb"] = gpu_info.torch_memory()["vram_peak_gb"]  # peak now includes the upscaler
-            final_path = up["upscaled_path"]
+            final_path = rec["upscaled_path"]
 
         rec["id"] = db.insert(rec)
         print(f"#{rec['id']} {spec.key} saved {path.name}  {s.width}x{s.height}  {rec['inference_seconds']}s  "
@@ -460,7 +496,12 @@ def generate(prompt: str, negative: str, model_choice: str, progress=gr.Progress
         None,
         gr.update(visible=True),
         upscale_hint(records, None),
+        loaded_line(),
     )
+
+
+def clear_all():
+    return "", None, "", [], None, gr.update(visible=False), "", ""
 
 
 def upscale_hint(records: list[dict], selected: int | None) -> str:
@@ -487,7 +528,6 @@ def upscale(records: list[dict], selected: int | None, target: str, progress=gr.
     for n, idx in enumerate(todo):
         r = records[idx]
         progress(n / len(todo), desc=f"Upscaling image {idx + 1} to {target_px} px")
-        torch.cuda.reset_peak_memory_stats()
         rec = db.get(r["id"]) or {"image_path": r["image_path"]}
         fields = upscale_record(rec, target_px)
         db.update(r["id"], fields)
@@ -545,33 +585,222 @@ def select_history(evt: gr.SelectData, table: pd.DataFrame):
     return img, details_markdown(rec)
 
 
+# ----------------------------------------------------------------------------- admin tab
+
+THROTTLE_BITS = {
+    0x1: "GPU idle", 0x2: "application clock setting", 0x4: "software power cap", 0x8: "hardware slowdown",
+    0x10: "sync boost", 0x20: "software thermal slowdown", 0x40: "hardware thermal slowdown",
+    0x80: "hardware power brake", 0x100: "display clock setting",
+}
+
+
+def _throttle_text(hex_value: str | None) -> str:
+    try:
+        v = int(hex_value or "0", 16)
+    except ValueError:
+        return hex_value or "n/a"
+    names = [n for bit, n in THROTTLE_BITS.items() if v & bit]
+    return ", ".join(names) if names else "none"
+
+
+def _meter_color(pct: float | None) -> str:
+    if pct is None:
+        return "#EC4899"
+    if pct >= 95:
+        return STATUS["critical"][0]
+    if pct >= 85:
+        return STATUS["warning"][0]
+    return "#EC4899"
+
+
+def _temp_status(temp: float | None) -> str:
+    if temp is None:
+        return "good"
+    return "good" if temp < 70 else "warning" if temp < 83 else "serious" if temp < 90 else "critical"
+
+
+def tile(label: str, value: str, unit: str = "", sub: str = "", meter: float | None = None,
+         status: str | None = None, cores: list[float] | None = None) -> str:
+    html = [f'<div class="fz-tile"><div class="l">{label}</div>',
+            f'<div class="v">{value}<small>{unit}</small></div>']
+    if status:
+        color, icon, word = STATUS[status]
+        html.append(f'<div class="st" style="color:{color}">{icon} {word}</div>')
+    if sub:
+        html.append(f'<div class="s">{sub}</div>')
+    if meter is not None:
+        pct = max(0.0, min(100.0, meter))
+        html.append(f'<div class="fz-meter"><div style="width:{pct:.1f}%;background:{_meter_color(pct)}"></div></div>')
+    if cores:
+        bars = "".join(f'<div title="core {i}: {c:.0f}%"><div style="height:{max(3, c):.0f}%"></div></div>' for i, c in enumerate(cores))
+        html.append(f'<div class="fz-cores">{bars}</div>')
+    html.append("</div>")
+    return "".join(html)
+
+
+def _kv(rows: list[tuple[str, object]]) -> str:
+    out = ["| | |", "|---|---|"]
+    for k, v in rows:
+        out.append(f"| {k} | {'n/a' if v in (None, '') else v} |")
+    return "\n".join(out)
+
+
+def gpu_energy_estimate() -> tuple[float, int]:
+    """Rough GPU energy of all recorded generations: inference seconds × mean of before/after power."""
+    wh, n = 0.0, 0
+    for r in db.fetch(limit=10**6):
+        p = [x for x in (r.get("power_before_w"), r.get("power_after_w")) if x]
+        if p and r.get("inference_seconds"):
+            wh += r["inference_seconds"] * (sum(p) / len(p)) / 3600
+            n += 1
+    return wh, n
+
+
+def admin_refresh(check_internet: bool):
+    d = sysinfo.everything(loaded_model=MANAGER.spec.name if MANAGER.spec else None, check_internet=check_internet)
+    c, m, dk, n, g, p, sw, a = d["cpu"], d["memory"], d["disks"], d["network"], d["gpu"], d["power"], d["software"], d["app"]
+    live, st, tm, ex = g["live"], g["static"], g["torch"], g["extra"]
+
+    vram_used, vram_total = live.get("mem_used_mb"), live.get("mem_total_mb")
+    vram_pct = vram_used / vram_total * 100 if vram_used and vram_total else None
+    sysdisk = next((x for x in dk["partitions"] if x["mount"].upper().startswith("C")), dk["partitions"][0] if dk["partitions"] else None)
+    up, down = n.get("up_rate"), n.get("down_rate")
+    temp = live.get("temperature_c")
+
+    tiles = "".join([
+        tile("GPU load", f"{live.get('gpu_util_pct', 0):.0f}", "%", f"{live.get('sm_clock_mhz', 0):.0f} MHz · {live.get('pstate', '')}",
+             meter=live.get("gpu_util_pct")),
+        tile("VRAM used", f"{(vram_used or 0) / 1024:.1f}", f" / {(vram_total or 0) / 1024:.0f} GB",
+             f"torch {tm.get('vram_allocated_gb', 0)} GB allocated", meter=vram_pct),
+        tile("GPU temperature", f"{temp if temp is not None else 'n/a'}", " °C", f"fan {live.get('fan_pct', 0):.0f} %",
+             status=_temp_status(temp)),
+        tile("GPU power", f"{p.get('gpu_draw_w') or 0:.0f}", f" / {p.get('gpu_limit_w') or 0:.0f} W",
+             f"{p.get('gpu_pct_of_limit') or 0:.0f} % of limit", meter=p.get("gpu_pct_of_limit")),
+        tile("CPU", f"{c.get('usage_pct') or 0:.0f}", "%", f"{c['logical_cores']} threads · {c.get('freq_current_mhz') or 0} MHz",
+             cores=c.get("per_core_pct")),
+        tile("Memory", f"{m['used'] / 1024**3:.1f}", f" / {m['total'] / 1024**3:.0f} GB", f"{m['percent']:.0f} % used",
+             meter=m["percent"]),
+        tile("System disk", f"{(sysdisk['free'] if sysdisk else 0) / 1024**3:.0f}", " GB free",
+             f"{sysdisk['percent']:.0f} % used of {sysdisk['total'] / 1024**3:.0f} GB" if sysdisk else "", meter=sysdisk["percent"] if sysdisk else None),
+        tile("Network", f"↓ {human_bytes(down or 0)}/s", "", f"↑ {human_bytes(up or 0)}/s · {n.get('established') or 0} connections"),
+        tile("App uptime", a["uptime"], "", f"PID {a['pid']} · RSS {human_bytes(a['rss'])}"),
+    ])
+    tiles_html = f'<div class="fz-admin-head"><span>Collected {d["collected_at"][11:]}</span>' \
+                 f'<span>{n["hostname"]} · {n.get("primary_ip") or "no IP"} · {sw["os"]}</span></div><div class="fz-tiles">{tiles}</div>'
+
+    gpu_md = "#### GPU\n" + _kv([
+        ("Card", f"{st.get('gpu_name')} · {st.get('vram_total_gb')} GB · compute {st.get('compute_capability')} · {st.get('multiprocessors')} SMs"),
+        ("Driver / CUDA / cuDNN", f"{live.get('driver_version')} / {st.get('cuda_version')} / {st.get('cudnn_version')}"),
+        ("Clocks (current / max)", f"SM {live.get('sm_clock_mhz'):.0f} / {ex.get('max_sm_clock_mhz')} MHz · memory {live.get('mem_clock_mhz'):.0f} / {ex.get('max_mem_clock_mhz')} MHz"),
+        ("Utilisation", f"GPU {live.get('gpu_util_pct'):.0f} % · memory bus {live.get('mem_util_pct'):.0f} %"),
+        ("VRAM (nvidia-smi)", f"{(vram_used or 0):.0f} / {(vram_total or 0):.0f} MiB"),
+        ("VRAM (torch)", f"allocated {tm.get('vram_allocated_gb')} GB · reserved {tm.get('vram_reserved_gb')} GB · session peak {tm.get('vram_peak_gb')} GB"),
+        ("PCIe link", f"gen {ex.get('pcie_gen')} x{ex.get('pcie_width')} (drops to gen 1 x1 at idle)"),
+        ("Throttle reasons", _throttle_text(ex.get("throttle_reasons"))),
+        ("VBIOS / bus", f"{ex.get('vbios')} · {ex.get('pci_bus')}"),
+        ("Loaded model", f"{a.get('loaded_model') or 'none'} · {MANAGER.scheduler_name}"),
+    ])
+    if g["processes"]:
+        gpu_md += "\n\n**Processes on the GPU**\n\n| PID | VRAM | Name |\n|---|---|---|\n" + "\n".join(
+            f"| {x['pid']} | {x['vram_mb']} MiB | {x['name']} |" for x in g["processes"][:12])
+
+    cpu_md = "#### CPU\n" + _kv([
+        ("Processor", c["name"]),
+        ("Architecture", c["architecture"]),
+        ("Cores", f"{c['physical_cores']} physical · {c['logical_cores']} logical"),
+        ("Frequency", f"{c.get('freq_current_mhz')} MHz" + (f" (max {c['freq_max_mhz']} MHz)" if c.get("freq_max_mhz") else "")),
+        ("Usage", f"{c.get('usage_pct')} %  ·  per core: " + " ".join(f"{x:.0f}" for x in c.get("per_core_pct") or [])),
+        ("Load average (1/5/15 min)", f"{c.get('load_1m')} / {c.get('load_5m')} / {c.get('load_15m')}"),
+        ("Processes / threads", f"{c['processes']} / {c['threads']}"),
+        ("Booted", f"{c['boot_time'].replace('T', ' ')} · up {c['uptime']}"),
+    ])
+
+    parts = "\n".join(
+        f"| {x['mount']} | {x['fs']} | {human_bytes(x['total'])} | {human_bytes(x['used'])} | {human_bytes(x['free'])} | {x['percent']:.0f} % |"
+        for x in dk["partitions"])
+    pj = dk["project"]
+    mem_md = "#### Memory and storage\n" + _kv([
+        ("RAM", f"{human_bytes(m['used'])} used · {human_bytes(m['available'])} available · {human_bytes(m['total'])} total ({m['percent']:.0f} %)"),
+        ("Swap / page file", f"{human_bytes(m['swap_used'])} / {human_bytes(m['swap_total'])} ({m['swap_percent']:.0f} %)"),
+        ("Disk I/O since boot", f"read {human_bytes(dk.get('read_total'))} · written {human_bytes(dk.get('write_total'))}"),
+        ("Outputs folder", f"{human_bytes(pj['outputs'])} in {pj['outputs_files']} PNGs"),
+        ("Models folder", human_bytes(pj["models_dir"])),
+        ("Hugging Face cache", f"{human_bytes(pj['hf_cache'])} · `{pj['hf_cache_path']}`"),
+        ("Database", human_bytes(pj["database"])),
+    ]) + f"\n\n| Mount | FS | Total | Used | Free | Used % |\n|---|---|---|---|---|---|\n{parts}"
+
+    ifaces = "\n".join(
+        f"| {x['name']} | {'up' if x['up'] else 'down'} | {x['ipv4'] or ''} | {x['mac'] or ''} | "
+        f"{str(x['speed_mbps']) + ' Mb/s' if x['speed_mbps'] else ''} | {human_bytes(x['sent'])} | {human_bytes(x['recv'])} |"
+        for x in n["interfaces"] if x["up"] or x["ipv4"])
+    net_rows = [
+        ("Hostname / primary IP", f"{n['hostname']} · {n.get('primary_ip') or 'n/a'}"),
+        ("Throughput now", f"↓ {human_bytes(down or 0)}/s · ↑ {human_bytes(up or 0)}/s" + ("" if up is not None else " (refresh again for rates)")),
+        ("Totals since boot", f"sent {human_bytes(n['bytes_sent'])} ({n['packets_sent']:,} packets) · received {human_bytes(n['bytes_recv'])} ({n['packets_recv']:,} packets)"),
+        ("Errors / drops", f"in {n['errors_in']} / {n['drops_in']} · out {n['errors_out']} / {n['drops_out']}"),
+        ("Connections", f"{n.get('established')} established · listening on {', '.join(map(str, n['listening_ports'])) or 'n/a'}"),
+    ]
+    if d.get("internet"):
+        net_rows.append(("Reachability (TCP 443)", " · ".join(f"{h}: {ms} ms" if ms is not None else f"{h}: unreachable" for h, ms in d["internet"].items())))
+    net_md = "#### Network\n" + _kv(net_rows) + \
+        f"\n\n| Interface | State | IPv4 | MAC | Speed | Sent | Received |\n|---|---|---|---|---|---|---|\n{ifaces}"
+
+    wh, n_rec = gpu_energy_estimate()
+    bat = p.get("battery")
+    power_md = "#### Power\n" + _kv([
+        ("GPU draw", f"{p.get('gpu_draw_w')} W of {p.get('gpu_limit_w')} W limit ({p.get('gpu_pct_of_limit')} %)"),
+        ("GPU power limits", f"default {ex.get('power_default_limit_w')} W · max {ex.get('power_max_limit_w')} W"),
+        ("GPU performance state", f"{p.get('gpu_pstate')} · fan {p.get('gpu_fan_pct')} %"),
+        ("Windows power plan", p.get("windows_power_plan")),
+        ("Battery", f"{bat['percent']} % · {'plugged in' if bat['plugged'] else 'on battery'}" if bat else "none (desktop)"),
+        ("GPU energy, all generations", f"≈ {wh:.1f} Wh over {n_rec} images (inference time × mean power)"),
+    ])
+
+    stats = db.stats()
+    soft_md = "#### Software and app\n" + _kv([
+        ("OS", sw["os"]),
+        ("Python", sw["python"]),
+        ("torch / CUDA / cuDNN", f"{sw['torch']} / {sw['cuda']} / {sw['cudnn']}"),
+        ("diffusers / transformers / gradio", f"{sw['diffusers']} / {sw['transformers']} / {sw['gradio']}"),
+        ("Running in Docker", "yes" if sw["in_container"] else "no"),
+        ("App process", f"PID {a['pid']} · started {a['started'].replace('T', ' ')} · up {a['uptime']} · {human_bytes(a['rss'])} RSS · {a['threads']} threads"),
+        ("Working directory", f"`{a['working_dir']}`"),
+        ("Generations recorded", f"{stats.get('images') or 0} images · {stats.get('total_seconds') or 0} s GPU time · hottest {stats.get('max_temp_c') or 'n/a'} °C · peak {stats.get('max_power_w') or 'n/a'} W"),
+    ])
+    return tiles_html, gpu_md, cpu_md, mem_md, net_md, power_md, soft_md
+
+
 # ----------------------------------------------------------------------------- ui
 
-with gr.Blocks(title="Frazile AI · Image Studio") as demo:
-    gr.HTML(header_html(STATIC_GPU, UPSCALER.name))
+with gr.Blocks(title="Frazile AI · Image Studio", fill_width=True) as demo:
+    gr.HTML(header_html(STATIC_GPU))
 
     with gr.Tabs():
         with gr.Tab("Generate"):
-            with gr.Row():
-                with gr.Column(scale=1, min_width=360):
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=2, min_width=380):
                     prompt = gr.Textbox(
-                        label="Prompt", lines=4,
+                        label="Prompt", lines=5,
                         placeholder="a cozy cabin in a snowy forest at dusk, cinematic, 16:9, 4k",
+                        info="Enter generates · Shift+Enter adds a line",
                     )
                     interpreted = gr.Markdown("", elem_classes=["fz-interp"])
                     model_choice = gr.Dropdown(
                         MODEL_CHOICES, value="auto", label="Model",
                         info="Or name it in the prompt: 'model juggernaut'. Switching takes ~25 s; the first use of a model downloads it.",
                     )
+                    loaded_md = gr.Markdown(loaded_line(), elem_classes=["fz-loaded"])
                     negative = gr.Textbox(label="Negative prompt (what to avoid)", lines=2, value=DEFAULT_NEGATIVE)
-                    run = gr.Button("Generate", variant="primary", size="lg")
+                    with gr.Row():
+                        run = gr.Button("Generate", variant="primary", size="lg", scale=3)
+                        clear = gr.Button("Clear", variant="secondary", size="lg", scale=1, min_width=90)
                     with gr.Accordion("What can I write in the prompt?", open=False):
                         gr.Markdown(HELP)
                     with gr.Accordion("Models", open=False):
                         gr.Markdown(models_markdown())
 
-                with gr.Column(scale=2):
-                    gallery = gr.Gallery(label="Results", columns=2, height=560, object_fit="contain")
+                with gr.Column(scale=5):
+                    gallery = gr.Gallery(label="Results", columns=2, height=640, object_fit="contain", preview=False)
                     with gr.Row(visible=False, elem_classes=["fz-upscale"]) as upscale_bar:
                         upscale_target = gr.Radio(UPSCALE_CHOICES, value="4k", label="Upscale with Real-ESRGAN", scale=3)
                         upscale_btn = gr.Button("Upscale", variant="primary", scale=1, min_width=140)
@@ -584,9 +813,10 @@ with gr.Blocks(title="Frazile AI · Image Studio") as demo:
 
             prompt.change(preview, [prompt, model_choice], interpreted, show_progress="hidden")
             model_choice.change(preview, [prompt, model_choice], interpreted, show_progress="hidden")
-            gen_outputs = [gallery, details, last_records, selected_index, upscale_bar, upscale_note]
+            gen_outputs = [gallery, details, last_records, selected_index, upscale_bar, upscale_note, loaded_md]
             run.click(generate, [prompt, negative, model_choice], gen_outputs)
             prompt.submit(generate, [prompt, negative, model_choice], gen_outputs)
+            clear.click(clear_all, None, [prompt, gallery, details, last_records, selected_index, upscale_bar, upscale_note, interpreted])
             gallery.select(on_select, [last_records], [selected_index, upscale_note])
             upscale_btn.click(upscale, [last_records, selected_index, upscale_target],
                               [gallery, details, last_records, upscale_note])
@@ -614,7 +844,7 @@ with gr.Blocks(title="Frazile AI · Image Studio") as demo:
                 label="Click a row to see the image and its full details",
             )
             with gr.Row():
-                hist_image = gr.Image(label="Image", type="filepath", height=480)
+                hist_image = gr.Image(label="Image", type="filepath", height=520)
                 hist_details = gr.Markdown("")
 
             history_tab.select(refresh_history, [search, limit], [table, stats_md])
@@ -622,5 +852,35 @@ with gr.Blocks(title="Frazile AI · Image Studio") as demo:
             search.submit(refresh_history, [search, limit], [table, stats_md])
             table.select(select_history, [table], [hist_image, hist_details])
 
+        with gr.Tab("Admin") as admin_tab:
+            with gr.Row():
+                admin_refresh_btn = gr.Button("Refresh", variant="primary", scale=1, min_width=120)
+                auto_refresh = gr.Checkbox(label="Auto-refresh every 5 s", value=False, scale=1)
+                internet_check = gr.Checkbox(label="Check internet reachability (Hugging Face, GitHub, PyPI)", value=False, scale=2)
+            admin_tiles = gr.HTML("")
+            with gr.Row():
+                with gr.Column():
+                    admin_gpu = gr.Markdown("")
+                    admin_power = gr.Markdown("")
+                    admin_soft = gr.Markdown("")
+                with gr.Column():
+                    admin_cpu = gr.Markdown("")
+                    admin_mem = gr.Markdown("")
+                    admin_net = gr.Markdown("")
+            admin_outputs = [admin_tiles, admin_gpu, admin_cpu, admin_mem, admin_net, admin_power, admin_soft]
+            timer = gr.Timer(5, active=False)
+
+            admin_tab.select(admin_refresh, [internet_check], admin_outputs)
+            admin_refresh_btn.click(admin_refresh, [internet_check], admin_outputs)
+            timer.tick(admin_refresh, [internet_check], admin_outputs, show_progress="hidden")
+            auto_refresh.change(lambda on: gr.Timer(active=on), auto_refresh, timer)
+
 if __name__ == "__main__":
-    demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True, theme=build_theme(), css=CSS)
+    in_docker = os.environ.get("FRAZILE_IN_DOCKER") == "1"
+    demo.launch(
+        server_name=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"),
+        server_port=int(os.environ.get("GRADIO_SERVER_PORT", "7860")),
+        inbrowser=not in_docker and os.environ.get("FRAZILE_NO_BROWSER") != "1",
+        theme=build_theme(),
+        css=CSS,
+    )

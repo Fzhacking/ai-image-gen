@@ -1,0 +1,26 @@
+services:
+  image-studio:
+    build: .
+    image: frazile/ai-image-studio:latest
+    container_name: frazile-image-studio
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./outputs:/app/outputs                 # generated images
+      - ./models:/app/models                   # Real-ESRGAN weights, your checkpoints and LoRAs
+      - ./generations.db:/app/generations.db   # history database (create an empty file first on Linux)
+      - hf-cache:/cache/huggingface            # downloaded models (tens of GB; kept between rebuilds)
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}                 # optional: Hugging Face token so FLUX can download
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    shm_size: "2gb"
+    restart: unless-stopped
+
+volumes:
+  hf-cache:

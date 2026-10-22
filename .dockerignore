@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+outputs/
+models/*.pth
+models/checkpoints/*.safetensors
+models/loras/*.safetensors
+generations.db
+docs/
+.git/
+.gitignore
+*.log

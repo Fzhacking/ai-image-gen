@@ -74,8 +74,10 @@ requirements.txt). FLUX has no negative prompt and ignores LoRAs here.
 .\.venv\Scripts\python.exe app.py
 ```
 
-Opens http://127.0.0.1:7860. Write everything in the prompt; the only control is the Model box,
-and even that can be overridden from the prompt.
+Opens http://127.0.0.1:7860 in a full-width, dark Frazile AI studio layout. Write everything in the
+prompt; the only control is the Model box, and even that can be overridden from the prompt.
+After a generation an **Upscale** bar appears: pick 2K / 4K / 8K and upscale the selected image
+or the whole batch with Real-ESRGAN.
 
 | Want | Say in the prompt |
 |---|---|
@@ -97,6 +99,51 @@ Example: `a cozy cabin in a snowy forest at dusk, cinematic, 16:9, 4k, seed 42`
 
 A line under the prompt box shows how the prompt was interpreted before you generate.
 Every result is also saved to `outputs\`.
+
+## Admin panel
+
+The **Admin** tab is a live system panel. Tiles at the top show GPU load, VRAM, GPU temperature
+(with an OK / Warm / Hot / Critical state), GPU power against its limit, CPU usage with a
+per-core bar strip, memory, system-disk space, network throughput and app uptime. Below them:
+
+- **GPU:** card, driver / CUDA / cuDNN, current and maximum clocks, utilisation, VRAM from
+  nvidia-smi and from torch, PCIe link, throttle reasons (decoded), VBIOS, processes on the GPU,
+  loaded model and sampler.
+- **CPU:** model, cores, frequency, usage per core, load averages, process and thread counts, boot time.
+- **Memory and storage:** RAM, page file, disk I/O since boot, every partition, and the size of the
+  outputs folder, models folder, Hugging Face cache and database.
+- **Network:** hostname and primary IP, live up/down throughput, totals since boot, errors and drops,
+  connections and listening ports, every interface with IPv4, MAC and link speed, and an optional
+  reachability check of Hugging Face, GitHub and PyPI.
+- **Power:** GPU draw and limits, performance state and fan, the active Windows power plan, battery
+  if present, and an estimate of the GPU energy used by every recorded generation.
+- **Software and app:** OS and library versions, whether it runs in Docker, the app process, and
+  generation totals from the database.
+
+Refresh by hand or tick **Auto-refresh every 5 s**. The panel is also available in the container.
+
+## Docker
+
+The whole app can run as a GPU container.
+
+```powershell
+docker compose up --build
+```
+
+Then open http://localhost:7860. Generated images land in `outputs\`, your checkpoints and
+LoRAs are read from `models\`, the history database is `generations.db`, and downloaded models
+go to a named volume (`hf-cache`) so rebuilds do not re-download them. Set `HF_TOKEN` in the
+environment (or a `.env` file) if you want FLUX to download inside the container.
+
+Requirements on the host:
+
+- **Windows 11:** WSL 2 (`wsl --install`), Docker Desktop with the WSL 2 backend, and the normal
+  NVIDIA Windows driver. GPU access is built into Docker Desktop; no extra toolkit is needed.
+- **Linux:** Docker, the NVIDIA driver and `nvidia-container-toolkit`.
+
+The image is based on `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` with PyTorch for CUDA 12.6.
+The first build downloads several GB of Python packages. Inside the container the Admin panel shows
+the container's own view of CPU, memory and network; GPU readings come from the host driver.
 
 ## Generation details and history
 
