@@ -116,6 +116,17 @@ def insert(record: dict[str, Any]) -> int:
         return cur.lastrowid
 
 
+def update(row_id: int, fields: dict[str, Any]) -> None:
+    """Set the given known columns on one generation (used when an image is upscaled later)."""
+    with connect() as con:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(generations)")} - {"id"}
+        known = {k: v for k, v in fields.items() if k in cols}
+        if not known:
+            return
+        assignments = ", ".join(f"{k} = ?" for k in known)
+        con.execute(f"UPDATE generations SET {assignments} WHERE id = ?", [*known.values(), row_id])
+
+
 def fetch(limit: int = 50, search: str = "") -> list[dict[str, Any]]:
     with connect() as con:
         if search:

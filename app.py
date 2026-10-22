@@ -1,5 +1,5 @@
 """
-Local web UI for AI image generation on your GPU (diffusers + Gradio).
+Frazile AI Image Studio: local web UI for AI image generation on your GPU (diffusers + Gradio).
 
 Run:
     .venv/Scripts/python.exe app.py
@@ -13,6 +13,9 @@ Everything is controlled from the prompt. Examples:
     "neon street at night using flux"
 See prompt_parser.py for the full list of understood words and models.py for the models.
 
+After a generation an Upscale bar appears under the results: pick 2K / 4K / 8K and upscale the
+selected image (or all of them) with Real-ESRGAN. Upscales are recorded on the same database row.
+
 Every generation is recorded in generations.db (SQLite) with its settings, timings and GPU
 telemetry. The History tab browses that database.
 """
@@ -25,19 +28,21 @@ from pathlib import Path
 import gradio as gr
 import pandas as pd
 import torch
+from PIL import Image
 
 import db
 import gpu_info
 import models
 from models import ModelManager, ModelSpec
 from prompt_parser import Settings, parse
-from upscaler import Upscaler
+from upscaler import TARGETS, Upscaler
 
 STARTUP_MODEL = "sdxl"
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 DEFAULT_NEGATIVE = "blurry, low quality, deformed, watermark, text"
+UPSCALE_CHOICES = [("2K (2560 px)", "2k"), ("4K (3840 px)", "4k"), ("8K (7680 px)", "8k")]
 
 HELP = """
 **Write everything in the prompt.** The app reads these hints:
@@ -50,7 +55,7 @@ HELP = """
 | Aspect ratio | `16:9`, `9:16`, `4:3`, `3:2`, `1:1`, `21:9` |
 | Exact size | `1920x1080`, `1024x768` (scaled to the GPU-friendly equivalent) |
 | Orientation | `portrait`, `landscape`, `square`, `wide`, `tall`, `wallpaper`, `phone wallpaper`, `poster`, `banner` |
-| Real 4K output | `4k` (3840 px long side), `8k` (7680 px), `2k` (2560 px), or a big size like `3840x2160`. Generated at native size, then upscaled with Real-ESRGAN. |
+| Real 4K output | `4k` (3840 px long side), `8k` (7680 px), `2k` (2560 px), or a big size like `3840x2160`. Generated at native size, then upscaled with Real-ESRGAN. You can also upscale afterwards with the Upscale bar. |
 | Quality | `highly detailed`, `masterpiece` (more steps) or `quick`, `draft` (fewer steps) |
 | Fidelity | `strict` (follow prompt closely) or `creative` (looser) |
 | Style | `photorealistic`, `anime`, `cinematic`, `watercolor`, `oil painting`, `3d render`, `pixel art`, `sketch`, `comic`, `cyberpunk`, `low poly` |
@@ -60,6 +65,143 @@ HELP = """
 """
 
 HISTORY_COLUMNS = ["id", "when", "prompt", "model", "size", "steps", "seconds", "it/s", "peak VRAM GB", "temp C", "seed"]
+
+
+# ----------------------------------------------------------------------------- branding
+
+PINK = gr.themes.Color(
+    name="frazile-pink", c50="#FDF2F8", c100="#FCE7F3", c200="#FBCFE8", c300="#F9A8D4", c400="#F472B6",
+    c500="#EC4899", c600="#DB2777", c700="#BE185D", c800="#9D174D", c900="#831843", c950="#500724",
+)
+YELLOW = gr.themes.Color(
+    name="frazile-yellow", c50="#FEFCE8", c100="#FEF9C3", c200="#FEF08A", c300="#FDE047", c400="#FACC15",
+    c500="#EAB308", c600="#CA8A04", c700="#A16207", c800="#854D0E", c900="#713F12", c950="#422006",
+)
+BG, SURFACE, SURFACE_2, BORDER, TEXT, MUTED = "#0B0F1A", "#141A2B", "#0F1422", "#232B40", "#F5F7FF", "#9AA3B8"
+GRADIENT = "linear-gradient(90deg, #EC4899 0%, #F59E0B 55%, #FACC15 100%)"
+GRADIENT_HOVER = "linear-gradient(90deg, #F472B6 0%, #FBBF24 55%, #FDE047 100%)"
+
+
+def build_theme() -> gr.themes.Base:
+    theme = gr.themes.Base(
+        primary_hue=PINK,
+        secondary_hue=YELLOW,
+        neutral_hue=gr.themes.colors.slate,
+        font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
+        font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "ui-monospace", "monospace"],
+        radius_size=gr.themes.sizes.radius_lg,
+    )
+    import inspect
+    valid = set(inspect.signature(gr.themes.Base.set).parameters)
+    both = {}  # apply every value to light and dark mode so the studio is always dark
+    for key, value in {
+        "body_background_fill": BG,
+        "body_text_color": TEXT,
+        "body_text_color_subdued": MUTED,
+        "background_fill_primary": SURFACE,
+        "background_fill_secondary": SURFACE_2,
+        "border_color_primary": BORDER,
+        "block_background_fill": SURFACE,
+        "block_border_color": BORDER,
+        "block_label_background_fill": SURFACE,
+        "block_label_text_color": MUTED,
+        "block_title_text_color": TEXT,
+        "block_info_text_color": MUTED,
+        "panel_background_fill": SURFACE,
+        "panel_border_color": BORDER,
+        "input_background_fill": SURFACE_2,
+        "input_background_fill_focus": SURFACE_2,
+        "input_border_color": BORDER,
+        "input_border_color_focus": "#EC4899",
+        "input_placeholder_color": "#5B6478",
+        "button_primary_background_fill": GRADIENT,
+        "button_primary_background_fill_hover": GRADIENT_HOVER,
+        "button_primary_text_color": "#1A0A12",
+        "button_primary_border_color": "transparent",
+        "button_secondary_background_fill": "#1C2436",
+        "button_secondary_background_fill_hover": "#273149",
+        "button_secondary_text_color": TEXT,
+        "button_secondary_border_color": "#2A3350",
+        "table_even_background_fill": "#121829",
+        "table_odd_background_fill": SURFACE_2,
+        "table_border_color": BORDER,
+        "checkbox_background_color": SURFACE_2,
+        "checkbox_background_color_selected": "#EC4899",
+        "checkbox_border_color": "#2A3350",
+        "checkbox_label_background_fill": SURFACE_2,
+        "checkbox_label_background_fill_selected": "#2A1A2E",
+        "checkbox_label_text_color": TEXT,
+        "checkbox_label_border_color": "#2A3350",
+        "color_accent": "#EC4899",
+        "color_accent_soft": "#2A1A2E",
+        "link_text_color": "#FACC15",
+        "link_text_color_hover": "#FDE047",
+        "slider_color": "#EC4899",
+        "shadow_drop": "0 1px 2px rgba(0,0,0,.35)",
+        "shadow_drop_lg": "0 12px 32px -12px rgba(236,72,153,.35)",
+        "block_shadow": "none",
+    }.items():
+        for k in (key, f"{key}_dark"):
+            if k in valid:
+                both[k] = value
+    return theme.set(**both)
+
+
+CSS = f"""
+.gradio-container {{ max-width: 1440px !important; }}
+footer {{ display: none !important; }}
+
+.fz-header {{ display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+              padding: 10px 4px 18px; border-bottom: 1px solid {BORDER}; margin-bottom: 14px; }}
+.fz-brand {{ display: flex; align-items: center; gap: 12px; }}
+.fz-mark {{ width: 40px; height: 40px; border-radius: 12px; background: {GRADIENT};
+            box-shadow: 0 8px 24px -8px rgba(236,72,153,.7); display: grid; place-items: center;
+            font-weight: 900; font-size: 20px; color: #1A0A12; letter-spacing: -.04em; }}
+.fz-logo {{ font-weight: 800; font-size: 26px; letter-spacing: -.02em; line-height: 1; color: {TEXT}; }}
+.fz-logo span {{ background: {GRADIENT}; -webkit-background-clip: text; background-clip: text; color: transparent; }}
+.fz-tag {{ color: {MUTED}; font-size: 13px; margin-top: 4px; }}
+.fz-sys {{ color: {MUTED}; font-size: 12px; font-family: var(--font-mono); text-align: right; line-height: 1.6; }}
+.fz-sys b {{ color: #FACC15; font-weight: 600; }}
+
+.fz-interp {{ border-left: 3px solid #EC4899; background: #17122A; border-radius: 10px;
+              padding: 8px 12px; font-size: 13px; margin: 2px 0 8px; }}
+.fz-interp p {{ margin: 0; }}
+.fz-interp small {{ color: {MUTED}; }}
+
+.fz-upscale {{ border: 1px dashed #3A2C4A; border-radius: 14px; padding: 10px 12px;
+               background: linear-gradient(180deg, #151225 0%, {SURFACE} 100%); margin-top: 8px; }}
+.fz-upscale .fz-hint {{ color: {MUTED}; font-size: 12px; }}
+
+button.primary {{ font-weight: 700; letter-spacing: .01em;
+                  box-shadow: 0 10px 28px -10px rgba(236,72,153,.75); transition: transform .08s ease; }}
+button.primary:hover {{ transform: translateY(-1px); }}
+button.secondary {{ font-weight: 600; }}
+.fz-ghost {{ background: transparent !important; border: 1px solid #3A2C4A !important; color: #FACC15 !important; }}
+
+.tabs > .tab-nav button.selected, .tab-nav button.selected {{ color: #FACC15 !important; border-color: #EC4899 !important; }}
+.prose h3 {{ color: #FACC15; }}
+.prose table th {{ color: #F9A8D4; }}
+.prose code {{ background: #1C1530; color: #FDE68A; border: 1px solid #3A2C4A; }}
+.gallery-item, .thumbnail-item {{ border-radius: 12px !important; }}
+.progress-bar {{ background: {GRADIENT} !important; }}
+"""
+
+
+def header_html(static_gpu: dict, upscaler_name: str) -> str:
+    return f"""
+<div class="fz-header">
+  <div class="fz-brand">
+    <div class="fz-mark">F</div>
+    <div>
+      <div class="fz-logo">Frazile <span>AI</span></div>
+      <div class="fz-tag">Image Studio · SDXL fine-tunes, FLUX, LoRAs and Real-ESRGAN on your own GPU</div>
+    </div>
+  </div>
+  <div class="fz-sys">
+    <b>{static_gpu['gpu_name']}</b> · {static_gpu['vram_total_gb']} GB VRAM<br>
+    CUDA {static_gpu['cuda_version']} · torch {static_gpu['torch_version']} · {upscaler_name}
+  </div>
+</div>"""
 
 
 def models_markdown() -> str:
@@ -184,6 +326,29 @@ def details_markdown(rec: dict) -> str:
     return "\n".join(lines)
 
 
+def upscale_record(rec: dict, target_px: int, exact_size: tuple[int, int] | None = None) -> dict:
+    """Upscale one generation's native image to target_px long side; save, record in the DB, return fields."""
+    img = Image.open(rec["image_path"]).convert("RGB")
+    up_img, up_info = UPSCALER.upscale_to(img, target_px)
+    if exact_size:
+        tw, th = exact_size
+        left, top = max(0, (up_img.width - tw) // 2), max(0, (up_img.height - th) // 2)
+        up_img = up_img.crop((left, top, left + min(tw, up_img.width), top + min(th, up_img.height)))
+    up_path = Path(rec["image_path"]).with_name(f"{Path(rec['image_path']).stem}_{target_px}px.png")
+    up_img.save(up_path)
+    fields = {
+        "upscale_target": target_px,
+        "upscaled_width": up_img.width,
+        "upscaled_height": up_img.height,
+        "upscaled_path": str(up_path),
+        "upscaled_size_kb": round(up_path.stat().st_size / 1024, 1),
+        "upscale_seconds": up_info["seconds"],
+        "upscale_passes": up_info["passes"],
+        "upscaler": up_info["upscaler"],
+    }
+    return fields
+
+
 def generate(prompt: str, negative: str, model_choice: str, progress=gr.Progress()):
     if not prompt.strip():
         raise gr.Error("Please enter a prompt.")
@@ -207,7 +372,7 @@ def generate(prompt: str, negative: str, model_choice: str, progress=gr.Progress
 
     base_seed = s.seed if s.seed is not None else random.randint(0, 2**32 - 1)
     total_steps = s.steps * s.count
-    images, reports = [], []
+    images, reports, records = [], [], []
 
     for i in range(s.count):
         seed = base_seed + i
@@ -235,32 +400,7 @@ def generate(prompt: str, negative: str, model_choice: str, progress=gr.Progress
         img.save(path)
         t_end = time.perf_counter()
 
-        upscale_rec: dict = {}
-        final_img = img
-        if s.upscale_to:
-            progress(1.0, desc=f"Upscaling image {i + 1}/{s.count} to {s.upscale_to} px")
-            up_img, up_info = UPSCALER.upscale_to(img, s.upscale_to)
-            if s.exact_size:
-                tw, th = s.exact_size
-                left, top = max(0, (up_img.width - tw) // 2), max(0, (up_img.height - th) // 2)
-                up_img = up_img.crop((left, top, left + min(tw, up_img.width), top + min(th, up_img.height)))
-            up_path = OUTPUT_DIR / f"{stamp}_seed{seed}_{s.upscale_to}px.png"
-            up_img.save(up_path)
-            final_img = up_img
-            upscale_rec = {
-                "upscale_target": s.upscale_to,
-                "upscaled_width": up_img.width,
-                "upscaled_height": up_img.height,
-                "upscaled_path": str(up_path),
-                "upscaled_size_kb": round(up_path.stat().st_size / 1024, 1),
-                "upscale_seconds": up_info["seconds"],
-                "upscale_passes": up_info["passes"],
-                "upscaler": up_info["upscaler"],
-            }
-            mem = gpu_info.torch_memory()  # peak now includes the upscaler
-
         rec = {
-            **upscale_rec,
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "image_path": str(path),
             "file_size_kb": round(path.stat().st_size / 1024, 1),
@@ -295,14 +435,70 @@ def generate(prompt: str, negative: str, model_choice: str, progress=gr.Progress
             "fan_after_pct": after.get("fan_pct"),
             "pstate": after.get("pstate"),
         }
+
+        final_path = str(path)
+        if s.upscale_to:
+            progress(1.0, desc=f"Upscaling image {i + 1}/{s.count} to {s.upscale_to} px")
+            up = upscale_record(rec, s.upscale_to, s.exact_size)
+            rec.update(up)
+            rec["vram_peak_gb"] = gpu_info.torch_memory()["vram_peak_gb"]  # peak now includes the upscaler
+            final_path = up["upscaled_path"]
+
         rec["id"] = db.insert(rec)
         print(f"#{rec['id']} {spec.key} saved {path.name}  {s.width}x{s.height}  {rec['inference_seconds']}s  "
               f"peak {rec['vram_peak_gb']} GB  {rec['temp_after_c']} C"
-              + (f"  -> {final_img.width}x{final_img.height} in {upscale_rec['upscale_seconds']}s" if upscale_rec else ""))
-        images.append(final_img)
+              + (f"  -> {rec['upscaled_width']}x{rec['upscaled_height']} in {rec['upscale_seconds']}s" if rec.get("upscaled_path") else ""))
+        images.append(final_path)
         reports.append(details_markdown(rec))
+        records.append({"id": rec["id"], "image_path": str(path), "upscaled_path": rec.get("upscaled_path"),
+                        "width": s.width, "height": s.height})
 
-    return images, "\n\n---\n\n".join(reports)
+    return (
+        images,
+        "\n\n---\n\n".join(reports),
+        records,
+        None,
+        gr.update(visible=True),
+        upscale_hint(records, None),
+    )
+
+
+def upscale_hint(records: list[dict], selected: int | None) -> str:
+    if not records:
+        return ""
+    if selected is not None and 0 <= selected < len(records):
+        r = records[selected]
+        done = f" · already {Path(r['upscaled_path']).stem.rsplit('_', 1)[-1]}" if r.get("upscaled_path") else ""
+        return f"Image {selected + 1} of {len(records)} selected ({r['width']}x{r['height']}{done}). Click another image to change."
+    return (f"All {len(records)} images" if len(records) > 1 else "The generated image") + \
+        " will be upscaled. Click an image to upscale only that one."
+
+
+def on_select(evt: gr.SelectData, records: list[dict]):
+    return evt.index, upscale_hint(records, evt.index)
+
+
+def upscale(records: list[dict], selected: int | None, target: str, progress=gr.Progress()):
+    if not records:
+        raise gr.Error("Generate an image first.")
+    target_px = TARGETS[target]
+    todo = [selected] if selected is not None and 0 <= selected < len(records) else list(range(len(records)))
+    images, reports = [], []
+    for n, idx in enumerate(todo):
+        r = records[idx]
+        progress(n / len(todo), desc=f"Upscaling image {idx + 1} to {target_px} px")
+        torch.cuda.reset_peak_memory_stats()
+        rec = db.get(r["id"]) or {"image_path": r["image_path"]}
+        fields = upscale_record(rec, target_px)
+        db.update(r["id"], fields)
+        r["upscaled_path"] = fields["upscaled_path"]
+        print(f"#{r['id']} upscaled -> {fields['upscaled_width']}x{fields['upscaled_height']} in {fields['upscale_seconds']}s")
+    for r in records:
+        images.append(r.get("upscaled_path") or r["image_path"])
+        full = db.get(r["id"])
+        if full:
+            reports.append(details_markdown(full))
+    return images, "\n\n---\n\n".join(reports), records, upscale_hint(records, selected)
 
 
 # ----------------------------------------------------------------------------- history tab
@@ -351,28 +547,24 @@ def select_history(evt: gr.SelectData, table: pd.DataFrame):
 
 # ----------------------------------------------------------------------------- ui
 
-with gr.Blocks(title="AI Image Generator") as demo:
-    gr.Markdown(
-        f"# AI Image Generator\n{STATIC_GPU['gpu_name']} · {STATIC_GPU['vram_total_gb']} GB VRAM · "
-        f"CUDA {STATIC_GPU['cuda_version']} · torch {STATIC_GPU['torch_version']} · upscaler {UPSCALER.name}"
-    )
+with gr.Blocks(title="Frazile AI · Image Studio") as demo:
+    gr.HTML(header_html(STATIC_GPU, UPSCALER.name))
 
     with gr.Tabs():
         with gr.Tab("Generate"):
             with gr.Row():
-                with gr.Column(scale=1):
+                with gr.Column(scale=1, min_width=360):
                     prompt = gr.Textbox(
                         label="Prompt", lines=4,
                         placeholder="a cozy cabin in a snowy forest at dusk, cinematic, 16:9, 4k",
                     )
-                    interpreted = gr.Markdown("")
+                    interpreted = gr.Markdown("", elem_classes=["fz-interp"])
                     model_choice = gr.Dropdown(
                         MODEL_CHOICES, value="auto", label="Model",
-                        info="Or name it in the prompt: 'model juggernaut'. Switching models takes ~15 s; "
-                             "the first use of a model downloads it.",
+                        info="Or name it in the prompt: 'model juggernaut'. Switching takes ~25 s; the first use of a model downloads it.",
                     )
                     negative = gr.Textbox(label="Negative prompt (what to avoid)", lines=2, value=DEFAULT_NEGATIVE)
-                    run = gr.Button("Generate", variant="primary")
+                    run = gr.Button("Generate", variant="primary", size="lg")
                     with gr.Accordion("What can I write in the prompt?", open=False):
                         gr.Markdown(HELP)
                     with gr.Accordion("Models", open=False):
@@ -380,13 +572,24 @@ with gr.Blocks(title="AI Image Generator") as demo:
 
                 with gr.Column(scale=2):
                     gallery = gr.Gallery(label="Results", columns=2, height=560, object_fit="contain")
+                    with gr.Row(visible=False, elem_classes=["fz-upscale"]) as upscale_bar:
+                        upscale_target = gr.Radio(UPSCALE_CHOICES, value="4k", label="Upscale with Real-ESRGAN", scale=3)
+                        upscale_btn = gr.Button("Upscale", variant="primary", scale=1, min_width=140)
+                    upscale_note = gr.Markdown("", elem_classes=["fz-hint"])
                     with gr.Accordion("Generation details (GPU, timing, settings)", open=True):
                         details = gr.Markdown("")
 
+            last_records = gr.State([])
+            selected_index = gr.State(None)
+
             prompt.change(preview, [prompt, model_choice], interpreted, show_progress="hidden")
             model_choice.change(preview, [prompt, model_choice], interpreted, show_progress="hidden")
-            run.click(generate, [prompt, negative, model_choice], [gallery, details])
-            prompt.submit(generate, [prompt, negative, model_choice], [gallery, details])
+            gen_outputs = [gallery, details, last_records, selected_index, upscale_bar, upscale_note]
+            run.click(generate, [prompt, negative, model_choice], gen_outputs)
+            prompt.submit(generate, [prompt, negative, model_choice], gen_outputs)
+            gallery.select(on_select, [last_records], [selected_index, upscale_note])
+            upscale_btn.click(upscale, [last_records, selected_index, upscale_target],
+                              [gallery, details, last_records, upscale_note])
 
             gr.Examples(
                 examples=[
@@ -420,4 +623,4 @@ with gr.Blocks(title="AI Image Generator") as demo:
             table.select(select_history, [table], [hist_image, hist_details])
 
 if __name__ == "__main__":
-    demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True)
+    demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True, theme=build_theme(), css=CSS)
