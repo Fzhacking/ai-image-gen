@@ -9,6 +9,8 @@ Built-in models (Hugging Face repos, downloaded on first use into the HF cache):
     dreamshaper  DreamShaper XL v2 Turbo             fast (6 steps) illustration / fantasy
     playground   Playground v2.5                     highly aesthetic, painterly-real
     animagine    Animagine XL 3.1                    anime
+    zimage       Z-Image Turbo                       6B flow model, 8 steps, photoreal + text,
+                                                     Apache 2.0, ~20 GB, runs on 24 GB with offload
     flux         FLUX.1 [schnell]                    best prompt understanding, 4 steps
                                                      (gated: `huggingface-cli login` + accept
                                                      terms; ~33 GB; runs 4-bit on 24 GB cards)
@@ -91,6 +93,13 @@ BUILTIN: list[ModelSpec] = [
         aliases=("anime-xl", "animagine-xl", "animaginexl"),
         styles=("anime style",),
         description="anime and manga characters",
+    ),
+    ModelSpec(
+        key="zimage", name="Z-Image Turbo", source="Tongyi-MAI/Z-Image-Turbo",
+        family="zimage", steps=8, guidance=0.0, scheduler=None, variant=None, negative=False,
+        aliases=("z-image", "z-image-turbo", "zimage-turbo", "zit"),
+        description="6B flow model, 8 steps, photoreal and text rendering; Apache 2.0; ~20 GB",
+        download_gb=20,
     ),
     ModelSpec(
         key="flux", name="FLUX.1 [schnell]", source="black-forest-labs/FLUX.1-schnell",
@@ -193,7 +202,7 @@ def is_downloaded(spec: ModelSpec) -> bool:
     snaps = Path(HF_HUB_CACHE) / f"models--{spec.source.replace('/', '--')}" / "snapshots"
     if not snaps.is_dir():
         return False
-    big = "transformer" if spec.family == "flux" else "unet"
+    big = "unet" if spec.family == "sdxl" else "transformer"
     return any((snap / big).is_dir() and any((snap / big).glob("*.safetensors")) for snap in snaps.iterdir())
 
 
@@ -260,7 +269,12 @@ class ModelManager:
         if not is_downloaded(spec):
             log(f"Downloading {spec.name} (~{spec.download_gb:g} GB, first time only) ...")
         log(f"Loading {spec.name} ...")
-        pipe = self._load_flux(spec, log) if spec.family == "flux" else self._load_sdxl(spec)
+        if spec.family == "flux":
+            pipe = self._load_flux(spec, log)
+        elif spec.family == "zimage":
+            pipe = self._load_zimage(spec, log)
+        else:
+            pipe = self._load_sdxl(spec)
         pipe.set_progress_bar_config(disable=True)
         self.spec, self.pipe = spec, pipe
         self.scheduler_name = SCHEDULER_NAMES.get(spec.scheduler or "", type(pipe.scheduler).__name__)
@@ -316,6 +330,44 @@ class ModelManager:
                 "https://huggingface.co/black-forest-labs/FLUX.1-schnell, then run "
                 "`.venv\\Scripts\\huggingface-cli login` and try again."
             ) from e
+
+    def _load_zimage(self, spec: ModelSpec, log=print):
+        """Z-Image Turbo: 6B flow transformer + Qwen3 text encoder, bf16, about 18 GB resident.
+        Fits a 24 GB card with per-model CPU offload (the text encoder leaves the GPU after encoding)."""
+        import torch
+        from diffusers import ZImagePipeline, ZImageTransformer2DModel
+        dtype = torch.bfloat16
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        # The repo stores the transformer in fp32 (23 GB). It is loaded shard by shard straight onto the GPU
+        # in bf16 (CPU offload on a 16 GB machine crashed), and the bf16 copy is saved next to the project
+        # once so later loads read 12 GB instead of converting 23 GB.
+        bf16_dir = MODELS_DIR / "cache" / f"{spec.key}-transformer-bf16"
+        if (bf16_dir / "config.json").exists():
+            transformer = ZImageTransformer2DModel.from_pretrained(bf16_dir, torch_dtype=dtype, device_map=self.device)
+        else:
+            transformer = ZImageTransformer2DModel.from_pretrained(
+                spec.source, subfolder="transformer", torch_dtype=dtype, device_map=self.device,
+            )
+            log(f"Saving a bf16 copy of the transformer to {bf16_dir} for faster loads ...")
+            try:
+                transformer.save_pretrained(bf16_dir, max_shard_size="4GB")
+            except Exception as e:  # cache is an optimisation only
+                log(f"could not save bf16 copy ({e})")
+        if vram_gb < 32:
+            # 8-bit Qwen3 text encoder: 3.8 GB instead of 7.5 GB, so transformer + encoder + VAE fit a 24 GB card.
+            from transformers import BitsAndBytesConfig, Qwen3Model
+            log("Z-Image on <32 GB VRAM: loading the text encoder in 8-bit")
+            text_encoder = Qwen3Model.from_pretrained(
+                spec.source, subfolder="text_encoder", torch_dtype=dtype,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True), device_map=self.device,
+            )
+            pipe = ZImagePipeline.from_pretrained(
+                spec.source, transformer=transformer, text_encoder=text_encoder, torch_dtype=dtype,
+            )
+        else:
+            pipe = ZImagePipeline.from_pretrained(spec.source, transformer=transformer, torch_dtype=dtype)
+        pipe.to(self.device)
+        return pipe
 
     def unload(self) -> None:
         if self.pipe is None:

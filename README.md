@@ -1,6 +1,6 @@
 # Frazile AI - AI Image Generation (local GPU)
 
-Runs Stable Diffusion XL, its best community fine-tunes and FLUX.1 on your NVIDIA GPU using
+Runs Z-Image Turbo, Stable Diffusion XL, its best community fine-tunes and FLUX.1 on your NVIDIA GPU using
 Hugging Face `diffusers`, with prompt weighting, LoRAs and Real-ESRGAN upscaling.
 
 **Project owner:** Frazile AI  
@@ -34,6 +34,7 @@ Images are saved to `outputs\`. The first use of a model downloads it (~7 GB eac
 
 | Say in the prompt | Model | Steps | CFG | Best for |
 |---|---|---|---|---|
+| `model zimage` | Z-Image Turbo (default) | 8 | 0 | photoreal, legible text, strong prompt following; Apache 2.0 |
 | `model sdxl` | SDXL base 1.0 | 30 | 7 | general purpose baseline |
 | `model juggernaut` | Juggernaut XL v9 | 30 | 5 | photoreal people, products and scenes; best all-round upgrade |
 | `model realvis` | RealVisXL V5.0 | 30 | 4 | photoreal with strong skin, fabric and lighting detail |
@@ -47,10 +48,11 @@ Steps and CFG are the model's defaults; `quick`, `highly detailed`, `strict`, `c
 sampler (DPM++ SDE Karras for the turbo and RealVis models, Euler a for Animagine), which gives
 cleaner results than the stock sampler at the same step count.
 
-**Auto** (the default in the Model box) picks a model from the style words in the prompt once it
-is on disk: `photorealistic`/`cinematic` -> Juggernaut, `anime` -> Animagine, `oil painting` /
-`watercolor` -> Playground, `digital art`/`comic`/`cyberpunk` -> DreamShaper. Otherwise it keeps
-the model that is already loaded. Switching models takes about 15 s.
+**Auto** (the default in the Model box) keeps Z-Image Turbo or FLUX while one of them is loaded.
+When an SDXL-family model is loaded it picks a specialist from the style words once it is on disk:
+`photorealistic`/`cinematic` -> Juggernaut, `anime` -> Animagine, `oil painting` / `watercolor` ->
+Playground, `digital art`/`comic`/`cyberpunk` -> DreamShaper. Otherwise it keeps the model that is
+already loaded. Switching between SDXL models takes about 26 s; Z-Image takes longer.
 
 **Your own checkpoints:** drop any SDXL `.safetensors` file (Civitai downloads, merges, your own
 fine-tunes) into `models\checkpoints\`. It appears in the model list under its file name after a
@@ -61,6 +63,10 @@ restart. Files with `turbo`, `lightning` or `hyper` in the name get 6-step defau
 
 **Prompt weighting (SDXL family):** `(glowing sword:1.3)` or `(glowing sword)++` emphasises,
 `(word:0.7)` or `(word)--` de-emphasises. Prompts longer than 77 tokens are no longer cut off.
+
+**Z-Image Turbo** is the model loaded at start-up. It is a 6B flow model from Tongyi-MAI that renders
+photoreal scenes and readable text in 8 steps with no guidance; it has no negative prompt and ignores LoRAs and
+weighting. On a 24 GB card it runs with CPU offload (~20 GB download).
 
 **FLUX.1 [schnell]** is gated on Hugging Face. Accept the terms at
 https://huggingface.co/black-forest-labs/FLUX.1-schnell, run `.venv\Scripts\huggingface-cli login`,

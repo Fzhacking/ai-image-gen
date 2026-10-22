@@ -10,3 +10,4 @@ docs/
 .git/
 .gitignore
 *.log
+models/cache/

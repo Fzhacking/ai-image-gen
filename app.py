@@ -44,7 +44,7 @@ from prompt_parser import Settings, parse
 from sysinfo import human_bytes
 from upscaler import TARGETS, Upscaler
 
-STARTUP_MODEL = "sdxl"
+STARTUP_MODEL = "zimage"
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -243,9 +243,9 @@ def models_markdown() -> str:
     loras = ", ".join(f"`<lora:{n}>`" for n in models.available_loras()) or "none yet"
     rows += [
         "",
-        "**Auto** picks a model from the style words in the prompt (photo/cinematic → Juggernaut, anime → Animagine, "
-        "painting → Playground, digital art/comic → DreamShaper) when that model is already on disk; otherwise it keeps "
-        "the model currently loaded.",
+        "**Auto** keeps Z-Image Turbo (loaded at start) or FLUX when one of them is active. When an SDXL-family model "
+        "is loaded it picks a specialist from the style words (photo/cinematic → Juggernaut, anime → Animagine, "
+        "painting → Playground, digital art/comic → DreamShaper) if that model is already on disk.",
         "",
         f"**Add your own:** drop any SDXL `.safetensors` checkpoint (for example from Civitai) into `models/checkpoints/` and "
         f"SDXL LoRAs into `models/loras/`, then restart the app. LoRAs available now: {loras}.",
@@ -289,7 +289,8 @@ def pick_model(s: Settings, choice: str) -> tuple[ModelSpec, str | None]:
         return models.resolve(choice), None
     current = MANAGER.spec or models.resolve(STARTUP_MODEL)
     suited = models.model_for_style(s.style)
-    if suited and suited.key != current.key:
+    # Z-Image and FLUX handle every style themselves; Auto only swaps between SDXL-family specialists.
+    if suited and suited.key != current.key and current.family == "sdxl":
         if models.is_downloaded(suited):
             return suited, f"auto: {suited.name} for '{s.style}'"
         return current, f"{suited.name} suits '{s.style}' but is not downloaded; say 'model {suited.key}' to fetch it"

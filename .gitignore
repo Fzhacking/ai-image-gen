@@ -15,3 +15,6 @@ generations.db
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Local bf16 copies of converted models (rebuilt automatically)
+models/cache/
