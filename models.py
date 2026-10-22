@@ -11,6 +11,8 @@ Built-in models (Hugging Face repos, downloaded on first use into the HF cache):
     animagine    Animagine XL 3.1                    anime
     zimage       Z-Image Turbo                       6B flow model, 8 steps, photoreal + text,
                                                      Apache 2.0, ~20 GB, runs on 24 GB with offload
+    qwen         Qwen-Image + Lightning              20B model in 4-bit, 8 steps, best text
+                                                     rendering; ~48 GB, slow first load
     flux         FLUX.1 [schnell]                    best prompt understanding, 4 steps
                                                      (gated: `huggingface-cli login` + accept
                                                      terms; ~33 GB; runs 4-bit on 24 GB cards)
@@ -100,6 +102,14 @@ BUILTIN: list[ModelSpec] = [
         aliases=("z-image", "z-image-turbo", "zimage-turbo", "zit"),
         description="6B flow model, 8 steps, photoreal and text rendering; Apache 2.0; ~20 GB",
         download_gb=20,
+    ),
+    ModelSpec(
+        key="qwen", name="Qwen-Image (Lightning 8-step)", source="Qwen/Qwen-Image",
+        family="qwen", steps=8, guidance=1.0, scheduler=None, variant=None, negative=False,
+        aliases=("qwen-image", "qwenimage", "qwen-lightning"),
+        description="20B Qwen-Image in 4-bit with the Lightning LoRA: best text rendering and layout; "
+                    "~48 GB download, first load quantises for several minutes",
+        download_gb=48,
     ),
     ModelSpec(
         key="flux", name="FLUX.1 [schnell]", source="black-forest-labs/FLUX.1-schnell",
@@ -257,6 +267,7 @@ class ModelManager:
         self._empty_chunk = None
         self._loaded_loras: dict[str, Path] = {}
         self._loras_active = False
+        self._base_adapters: list[str] = []   # adapters a model always runs with (Qwen-Image Lightning)
 
     # --- loading -------------------------------------------------------------
 
@@ -273,6 +284,8 @@ class ModelManager:
             pipe = self._load_flux(spec, log)
         elif spec.family == "zimage":
             pipe = self._load_zimage(spec, log)
+        elif spec.family == "qwen":
+            pipe = self._load_qwen(spec, log)
         else:
             pipe = self._load_sdxl(spec)
         pipe.set_progress_bar_config(disable=True)
@@ -369,6 +382,56 @@ class ModelManager:
         pipe.to(self.device)
         return pipe
 
+    QWEN_TEXT_ENCODER = "diffusers/qwen-image-nf4"          # pre-quantised 4-bit Qwen2.5-VL-7B
+    QWEN_LIGHTNING = ("lightx2v/Qwen-Image-Lightning", "Qwen-Image-Lightning-8steps-V2.0-bf16.safetensors")
+
+    def _load_qwen(self, spec: ModelSpec, log=print):
+        """Qwen-Image (20B MMDiT) on a 24 GB card: transformer quantised to NF4 on first load and cached,
+        4-bit text encoder from the diffusers NF4 repo, and the Lightning 8-step LoRA as a permanent adapter."""
+        import math
+        import torch
+        from diffusers import (BitsAndBytesConfig as DiffBnb, FlowMatchEulerDiscreteScheduler, QwenImagePipeline,
+                               QwenImageTransformer2DModel)
+        from huggingface_hub import hf_hub_download
+        from transformers import Qwen2_5_VLForConditionalGeneration
+        dtype = torch.bfloat16
+
+        nf4_dir = MODELS_DIR / "cache" / f"{spec.key}-transformer-nf4"
+        if (nf4_dir / "config.json").exists():
+            transformer = QwenImageTransformer2DModel.from_pretrained(nf4_dir, torch_dtype=dtype, device_map=self.device)
+        else:
+            log("First load: quantising the 20B transformer to 4-bit (NF4) shard by shard, this takes several minutes ...")
+            transformer = QwenImageTransformer2DModel.from_pretrained(
+                spec.source, subfolder="transformer", torch_dtype=dtype, device_map=self.device,
+                quantization_config=DiffBnb(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=dtype),
+            )
+            log(f"Saving the 4-bit transformer to {nf4_dir} for faster loads ...")
+            try:
+                transformer.save_pretrained(nf4_dir, max_shard_size="4GB")
+            except Exception as e:
+                log(f"could not save 4-bit copy ({e})")
+
+        text_encoder = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            self.QWEN_TEXT_ENCODER, subfolder="text_encoder", torch_dtype=dtype, device_map=self.device,
+        )
+        pipe = QwenImagePipeline.from_pretrained(
+            spec.source, transformer=transformer, text_encoder=text_encoder, torch_dtype=dtype,
+        )
+        pipe.to(self.device)
+
+        # Lightning recipe from lightx2v: exponential time shift of log(3), 8 steps, no CFG.
+        pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(pipe.scheduler.config, **{
+            "base_image_seq_len": 256, "max_image_seq_len": 8192, "base_shift": math.log(3), "max_shift": math.log(3),
+            "shift": 1.0, "shift_terminal": None, "use_dynamic_shifting": True, "time_shift_type": "exponential",
+        })
+        lora_path = hf_hub_download(*self.QWEN_LIGHTNING)
+        log("Attaching the Lightning 8-step LoRA ...")
+        pipe.load_lora_weights(lora_path, adapter_name="lightning")
+        self._base_adapters = ["lightning"]
+        self._loaded_loras["lightning"] = Path(lora_path)
+        pipe.set_adapters(["lightning"], adapter_weights=[1.0])
+        return pipe
+
     def unload(self) -> None:
         if self.pipe is None:
             return
@@ -378,6 +441,7 @@ class ModelManager:
         self._empty_chunk = None
         self._loaded_loras.clear()
         self._loras_active = False
+        self._base_adapters = []
         self.pipe = None
         self.spec = None
         gc.collect()
@@ -410,12 +474,16 @@ class ModelManager:
             names.append(adapter)
             weights.append(weight)
             notes.append(f"LoRA {path.stem} x{weight:g}")
+        base = [a for a in self._base_adapters if a not in names]
         if names:
             self.pipe.enable_lora()
-            self.pipe.set_adapters(names, adapter_weights=weights)
+            self.pipe.set_adapters(base + names, adapter_weights=[1.0] * len(base) + weights)
             self._loras_active = True
         elif self._loras_active:
-            self.pipe.disable_lora()
+            if base:
+                self.pipe.set_adapters(base, adapter_weights=[1.0] * len(base))
+            else:
+                self.pipe.disable_lora()
             self._loras_active = False
         return notes
 
@@ -482,6 +550,10 @@ class ModelManager:
             kw["callback_on_step_end"] = callback
         if self.spec and self.spec.family == "flux":
             kw["max_sequence_length"] = 256
+        if self.spec and self.spec.family == "qwen":
+            # Qwen-Image drives classifier-free guidance with true_cfg_scale; 1.0 (Lightning) means none.
+            kw["true_cfg_scale"] = max(1.0, guidance)
+            kw.pop("guidance_scale")
         return kw
 
 

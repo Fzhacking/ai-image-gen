@@ -294,7 +294,10 @@ def sec_requirements():
             ["Lykon/dreamshaper-xl-v2-turbo (fp16)", "Hugging Face Hub", "6.5 GB", "HF cache"],
             ["playgroundai/playground-v2.5-1024px-aesthetic (fp16)", "Hugging Face Hub", "6.5 GB", "HF cache"],
             ["cagliostrolab/animagine-xl-3.1", "Hugging Face Hub", "6.5 GB", "HF cache"],
-            ["Tongyi-MAI/Z-Image-Turbo (bf16)", "Hugging Face Hub", "20 GB", "HF cache"],
+            ["Tongyi-MAI/Z-Image-Turbo (bf16)", "Hugging Face Hub", "20 GB", "HF cache (+12 GB bf16 copy in models/cache/)"],
+            ["Qwen/Qwen-Image transformer, VAE, tokenizer", "Hugging Face Hub", "41 GB", "HF cache (+ ~11 GB 4-bit copy in models/cache/)"],
+            ["diffusers/qwen-image-nf4 text encoder", "Hugging Face Hub", "5.8 GB", "HF cache"],
+            ["lightx2v Qwen-Image-Lightning 8-step V2.0 LoRA", "Hugging Face Hub", "0.8 GB", "HF cache"],
             ["black-forest-labs/FLUX.1-schnell", "Hugging Face Hub (gated, login required)", "33 GB", "HF cache, not yet downloaded"],
             ["RealESRGAN_x4plus.pth", "github.com/xinntao/Real-ESRGAN releases v0.1.0", "64 MB", "models/ inside the project"],
             ["User checkpoints and LoRAs", "Civitai or own training", "varies", "models/checkpoints/, models/loras/"],
@@ -603,10 +606,12 @@ def sec_models():
             ["model dreamshaper", "DreamShaper XL v2 Turbo", "sdxl", "6", "2", "DPM++ SDE Karras", "fast illustration, fantasy and stylised art"],
             ["model playground", "Playground v2.5", "sdxl", "40", "3", "EDM (shipped)", "highly aesthetic, painterly-real composition and colour"],
             ["model animagine", "Animagine XL 3.1", "sdxl", "28", "6", "Euler a", "anime and manga characters"],
+            ["model qwen", "Qwen-Image + Lightning", "qwen", "8", "1", "flow matching, exponential shift", "20B model in 4-bit: best text rendering and layout, posters and signage"],
             ["model flux", "FLUX.1 schnell", "flux", "4", "0", "flow matching (shipped)", "best prompt understanding: text, counting, complex scenes"],
         ], [1, 1.3, 0.5, 0.45, 0.4, 1, 1.9]),
-        P("Aliases also work: z-image, zit, jugg, realistic, turbo, aesthetic, anime-xl, schnell. Playground keeps its own EDM "
-          "scheduler because its weights were trained with it; Z-Image and FLUX use their flow-matching schedulers."),
+        P("Aliases also work: z-image, zit, jugg, realistic, turbo, aesthetic, anime-xl, qwen-image, schnell. Playground keeps "
+          "its own EDM scheduler because its weights were trained with it; Z-Image, Qwen-Image and FLUX use flow-matching "
+          "schedulers."),
         figure("fig-6-1-model-comparison.jpg",
                "Figure 6.1: The same prompt (\"close-up portrait of an old fisherman with weathered skin, golden hour light, photorealistic, seed 11\") rendered by the six SDXL-family models at 832x1216 with their default settings.", 150),
         H2("6.2 Automatic selection", "s6-2"),
@@ -658,7 +663,16 @@ def sec_models():
           "encoding and the 12 GB transformer has room for activations. Like FLUX it has no negative prompt and no "
           "guidance scale, and LoRAs are not applied to it; prompt weighting is also not available because its "
           "text encoder is not CLIP."),
-        H2("6.8 FLUX.1 schnell on 24 GB", "s6-8"),
+        H2("6.8 Qwen-Image on 24 GB", "s6-8"),
+        P("Qwen-Image (Alibaba, Apache 2.0) is a 20-billion-parameter MMDiT with a Qwen2.5-VL-7B text encoder and "
+          "the strongest open-weight text rendering and layout control. Its bf16 weights are 41 GB, so on a 24 GB "
+          "card the loader quantises the transformer to 4-bit NF4 shard by shard straight onto the GPU on first use "
+          "and saves the result under models/cache/; the text encoder comes pre-quantised from the diffusers NF4 "
+          "repository. The Lightning 8-step LoRA from lightx2v is attached as a permanent adapter with the exponential "
+          "time-shift scheduler it was distilled for, which replaces the stock 50 steps with classifier-free guidance "
+          "by 8 steps without it. User LoRAs stack on top of Lightning. The model has no negative prompt in this "
+          "configuration and the guidance word scaling is ignored."),
+        H2("6.9 FLUX.1 schnell on 24 GB", "s6-9"),
         P("FLUX.1 is a 12-billion-parameter flow-matching transformer. Its bf16 weights alone are 24 GB, so on a card "
           "under 40 GB the loader quantises the transformer to 4-bit NF4 and the T5 text encoder to 8-bit with "
           "bitsandbytes, then enables per-model CPU offload. Expect a few minutes of load time and about 15 to 25 s "
@@ -1190,7 +1204,7 @@ def sec_appendix():
             ["Juggernaut XL v9, RealVisXL V5.0, DreamShaper XL v2 Turbo", "CreativeML Open RAIL++-M"],
             ["Playground v2.5", "Playground Community License"],
             ["Animagine XL 3.1", "Fair AI Public License 1.0-SD"],
-            ["Z-Image Turbo, FLUX.1 schnell", "Apache 2.0"],
+            ["Z-Image Turbo, Qwen-Image, Qwen-Image-Lightning, FLUX.1 schnell", "Apache 2.0"],
             ["Real-ESRGAN weights and code", "BSD 3-Clause"],
             ["diffusers, transformers, accelerate, peft, Gradio", "Apache 2.0"],
             ["compel, spandrel, bitsandbytes", "MIT"],

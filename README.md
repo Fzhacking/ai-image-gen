@@ -41,6 +41,7 @@ Images are saved to `outputs\`. The first use of a model downloads it (~7 GB eac
 | `model dreamshaper` | DreamShaper XL v2 Turbo | 6 | 2 | fast illustration, fantasy and stylised art |
 | `model playground` | Playground v2.5 | 40 | 3 | highly aesthetic, painterly-real composition and colour |
 | `model animagine` | Animagine XL 3.1 | 28 | 6 | anime and manga |
+| `model qwen` | Qwen-Image + Lightning | 8 | 1 | 20B model in 4-bit: best text rendering and layout, posters, signage |
 | `model flux` | FLUX.1 [schnell] | 4 | 0 | best prompt understanding: text, counting, complex scenes |
 
 Steps and CFG are the model's defaults; `quick`, `highly detailed`, `strict`, `creative`,
@@ -71,6 +72,12 @@ folder and restarting. They apply to SDXL-family models; Z-Image and FLUX need L
 **Z-Image Turbo** is the model loaded at start-up. It is a 6B flow model from Tongyi-MAI that renders
 photoreal scenes and readable text in 8 steps with no guidance; it has no negative prompt and ignores LoRAs and
 weighting. On a 24 GB card it runs with CPU offload (~20 GB download).
+
+**Qwen-Image** is Alibaba's 20B image model (Apache 2.0), the strongest open model for rendering
+text and complex layouts. To fit a 24 GB card it runs with the transformer quantised to 4-bit and the
+Lightning 8-step LoRA attached, so no negative prompt or guidance. The first `model qwen` downloads
+about 48 GB and then spends several minutes quantising; the 4-bit copy is cached under `models\cache\`
+so later loads are much faster. Stop other GPU programs first: it needs most of the card.
 
 **FLUX.1 [schnell]** is gated on Hugging Face. Accept the terms at
 https://huggingface.co/black-forest-labs/FLUX.1-schnell, run `.venv\Scripts\huggingface-cli login`,
