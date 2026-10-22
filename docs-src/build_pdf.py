@@ -30,10 +30,10 @@ IMAGES = Path(__file__).resolve().parent / "images"
 OWNER = "Frazile AI"
 PRODUCT = "AI Image Generator"
 SUBTITLE = "Technical Documentation, Workflows and Requirements"
-VERSION = "2.1"
+VERSION = "2.2"
 DATE = "22 October 2026"
 PLATFORM = "NVIDIA GeForce RTX 3090, Windows 11, Python 3.12"
-TAGLINE = ("Z-Image Turbo, Stable Diffusion XL and its best fine-tunes, Qwen-Image, FLUX.1, LoRAs and Real-ESRGAN, served "
+TAGLINE = ("Images, video and music on one GPU: Z-Image Turbo, SDXL fine-tunes, Qwen-Image, FLUX.1, LoRAs, LTX-Video, Wan 2.1, MusicGen and Real-ESRGAN, served "
            "locally with Gradio in the Frazile AI studio UI, with per-image GPU telemetry recorded in SQLite and an "
            "Admin panel that manages models, LoRAs and downloads and shows live system statistics.")
 
@@ -155,9 +155,10 @@ def sec_overview():
         H1("1. Project Overview", "s1"),
         H2("1.1 Purpose", "s1-1"),
         P(f"{PRODUCT} is a self-hosted application that turns a plain-English prompt into an image using Stable "
-          "Diffusion XL, its best community fine-tunes, or FLUX.1, running entirely on a local NVIDIA GPU. No image "
-          "data leaves the machine and there is no per-image cost."),
-        P("The project was built on 21 and 22 October 2026 and grew through eleven increments:"),
+          "Diffusion XL, its best community fine-tunes, Z-Image Turbo, Qwen-Image or FLUX.1, into a short video clip using "
+          "LTX-Video or Wan 2.1, or into a music track using MusicGen, running entirely on a local NVIDIA GPU. No data "
+          "leaves the machine and there is no per-image cost."),
+        P("The project was built on 21 and 22 October 2026 and grew through twelve increments:"),
         bullets([
             "A command-line script that runs Stable Diffusion XL on the GPU.",
             "A local web interface so a prompt can be typed and the result viewed in a browser.",
@@ -170,6 +171,7 @@ def sec_overview():
             "Z-Image Turbo as the default model, loaded shard by shard onto the GPU with a cached bf16 copy.",
             "Starter LoRAs with a LoRAs box, and Qwen-Image (20B) in 4-bit with the Lightning 8-step LoRA.",
             "Model and LoRA management in the Admin panel: a persistent registry, background downloads from Hugging Face, Civitai, URLs and local files, per-LoRA family and trigger words, settings, logs; plus quick-hint chips, live header, thumbnails and reuse actions in the Studio and History tabs.",
+            "Video and music: a Video tab (LTX-Video text- and image-to-video, Wan 2.1, frame-by-frame Real-ESRGAN upscaling to Full HD, 2K or 4K, soundtracks) and a Music tab (MusicGen), both recorded in History and managed from the same Admin panel.",
         ], numbered=True),
         H2("1.2 Key capabilities", "s1-2"),
         bullets([
@@ -186,6 +188,8 @@ def sec_overview():
             "Studio conveniences: quick-hint chips, a live header with loaded model, VRAM, temperature and running downloads, LoRA trigger-word reminders, Reuse seed and New variation buttons; History with model filter, thumbnail grid, reuse prompt (with or without seed) and delete.",
             "Command-line tools for batch generation with any model and LoRA, upscaling an existing image, querying the database and dumping system telemetry.",
             "A Dockerfile and docker-compose.yml for running the whole studio as a GPU container.",
+            "Text-to-video and image-to-video with LTX-Video 2B (24 fps, 768x512 and five other sizes, 2 to 10 s) and text-to-video with Wan 2.1 1.3B (16 fps, 832x480), exported as H.264 MP4; every frame can be upscaled with Real-ESRGAN to Full HD, 2K or 4K and a generated music track can be laid under the clip.",
+            "Text-to-music with MusicGen stereo medium and small (32 kHz stereo, 3 to 30 s, instrumental) and, for owners of a Hugging Face token, Stable Audio Open 1.0; tracks are saved as 16-bit WAV and shown with a waveform thumbnail in History.",
         ]),
         H2("1.3 Target environment", "s1-3"),
         P("The application was developed and verified on the following machine. Other NVIDIA GPUs with at least "
@@ -210,10 +214,11 @@ def sec_overview():
             ["7. Prompt language", "Complete reference of words the parser understands"],
             ["8. Database", "Schema of generations.db, every column explained, example queries"],
             ["9. Admin panel", "Model and LoRA management, sources and downloads, settings and logs, every tile and section of the system panel"],
-            ["10. Performance", "Measured timings and resource use on the RTX 3090 for every model"],
-            ["11. Deployment and Docker", "Container image, compose file, volumes, GPU access, host requirements"],
-            ["12. Operations", "Running, stopping, troubleshooting, known issues, backup, security"],
-            ["13. Change log and roadmap", "What was built in which order, defects fixed, future work"],
+            ["10. Video and music", "The Video and Music tabs, their models, GPU sharing, files, database columns and measured figures"],
+            ["11. Performance", "Measured timings and resource use on the RTX 3090 for every model"],
+            ["12. Deployment and Docker", "Container image, compose file, volumes, GPU access, host requirements"],
+            ["13. Operations", "Running, stopping, troubleshooting, known issues, backup, security"],
+            ["14. Change log and roadmap", "What was built in which order, defects fixed, future work"],
             ["Appendix", "File tree, dependency list, command cheat sheet, API access, licences"],
         ], [1, 3]),
     ]
@@ -249,6 +254,10 @@ def sec_requirements():
             ["FR-23", "Record which family a LoRA was trained for, route Auto to a matching model and never apply a LoRA to the wrong family.", "Done (v2.1)"],
             ["FR-24", "Show the application's own log and generation statistics per model in the Admin panel.", "Done (v2.1)"],
             ["FR-25", "Protect destructive Admin actions with a confirmation and an optional password when the server is reachable from other machines.", "Done (v2.1)"],
+            ["FR-26", "Generate a short video clip from a text prompt, or from a text prompt plus a start image, with a choice of size, length, steps, guidance and seed, saved as an MP4 that browsers play.", "Done (v2.2)"],
+            ["FR-27", "Upscale a generated clip frame by frame to Full HD, 2K or 4K with Real-ESRGAN, and lay a generated music track under it.", "Done (v2.2)"],
+            ["FR-28", "Generate a music track from a text prompt with a choice of length, guidance, temperature and seed, saved as WAV.", "Done (v2.2)"],
+            ["FR-29", "Manage video and music models like image models (registry, Admin editing, background download, load, unload, start-up) and record every clip and track in History with telemetry.", "Done (v2.2)"],
         ], [0.6, 4, 1.1]),
         H2("2.2 Non-functional requirements", "s2-2"),
         table(["ID", "Requirement", "How it is met"], [
@@ -264,6 +273,8 @@ def sec_requirements():
             ["NFR-10", "Code is dependency-light and readable: no framework beyond Gradio and diffusers.", "Fourteen Python modules, about 4,300 lines in total."],
             ["NFR-11", "Downloads must not block generation or the interface.", "Downloads run in a two-worker thread pool; the GPU work and the statistics refreshes use separate Gradio queues."],
             ["NFR-12", "Admin edits must survive restarts and be inspectable.", "models/registry.json, written atomically; the built-in list stays in code and only overrides are stored."],
+            ["NFR-13", "Video and music must share the single GPU with the image models without manual unloading.", "media.prepare_for(): a video model and an image model never share the card; a music model stays next to an image model while VRAM allows; the image model reloads on the next image."],
+            ["NFR-14", "Video and audio export must not depend on a system ffmpeg install.", "imageio-ffmpeg ships a static ffmpeg binary; video_io.py streams frames to it over a pipe so no clip is held in RAM."],
         ], [0.6, 2.4, 2.6]),
         H2("2.3 Hardware requirements", "s2-3"),
         table(["Component", "Minimum", "Recommended", "Verified on"], [
@@ -332,7 +343,7 @@ def sec_architecture():
         H1("3. System Architecture", "s3"),
         H2("3.1 Component overview", "s3-1"),
         P("The application is a single Python process. Gradio serves the browser interface and calls plain Python "
-          "functions; those functions use thirteen project modules, one resident diffusion model and the upscaler."),
+          "functions; those functions use sixteen project modules, one resident image model, at most one resident video or music model, and the upscaler."),
         table(["Component", "File", "Responsibility"], [
             ["Web application", "app.py", "Builds the Studio and History tabs, owns the ModelManager and the Upscaler, orchestrates one generation end to end, renders the details report, mounts the Admin panel."],
             ["Admin panel", "admin_ui.py", "Eight Admin sub-tabs and their handlers: models, LoRAs, add, downloads, system, settings, logs."],
@@ -341,6 +352,9 @@ def sec_architecture():
             ["Downloads", "downloads.py", "Source inspection (Hugging Face repo or file, Civitai, URL, local path), the background JobManager with progress, resumable file downloads, repo snapshots with byte progress, deletion of model files."],
             ["Theme and shared UI", "ui_theme.py, ui_common.py", "Colours, Gradio theme and CSS; dropdown choices, header, model cards, tiles, key-value tables and the downloads list."],
             ["Log buffer", "applog.py", "Tees stdout and stderr into a ring buffer for the Logs tab."],
+            ["Video and music engine", "media.py", "Profiles for LTX-Video, Wan 2.1, MusicGen and Stable Audio; MediaManager (load straight to GPU, bf16 text-encoder cache, unload, generate_video, generate_music); prepare_for() GPU coordination with the image ModelManager."],
+            ["Video and Music tabs", "media_ui.py", "Handlers and layout of both tabs: generation, frame-wise upscaling, soundtrack muxing, model defaults, chips, examples, media details report."],
+            ["Video and audio files", "video_io.py", "ffmpeg (from imageio-ffmpeg) wrappers: streamed MP4 encoding, frame reading, first-frame thumbnails, audio muxing; WAV writing and waveform pictures."],
             ["Prompt parser", "prompt_parser.py", "Turns free text into a Settings object: model, LoRAs, size, steps, guidance, count, seed, style, upscale target. Pure function, no GPU."],
             ["Upscaler", "upscaler.py", "Wraps Real-ESRGAN through spandrel; tiled x4 passes; resizes or crops to the requested target."],
             ["GPU telemetry", "gpu_info.py", "Static GPU facts from torch; live temperature, power, clocks, fan and load from nvidia-smi."],
@@ -519,10 +533,26 @@ def sec_workflows():
             "If port 7860 is reported busy, a previous instance is still running; end it from Task Manager (python.exe) or set GRADIO_SERVER_PORT.",
             "Back up the outputs\\ folder, generations.db and models\\ together. Built-in models can be re-downloaded and the virtual environment rebuilt from requirements.txt.",
         ]),
+        H2("4.14 Generating a video clip", "s4-14"),
+        bullets([
+            "Open the Video tab. Describe the scene, the motion and the camera in one or two sentences; the chips add camera and motion hints (tracking shot, drone shot, slow motion, golden hour ...).",
+            "Pick the model (LTX-Video 2B by default; Wan 2.1 for smoother but slower motion), a size, a length in seconds, and optionally steps, guidance and a seed. The model box resets steps, guidance and the negative prompt to the model's defaults.",
+            "Optional: drop a start image into the Start image box (LTX only). It is centre-cropped to the chosen size and animated (image-to-video).",
+            "Press Generate video. The first use unloads the image model, loads the video model (about 2 minutes the first time, about a minute afterwards) and shows step progress; the clip plays in the result box and its details appear below.",
+            "Optional: Upscale video (Full HD, 2K or 4K) runs every frame through Real-ESRGAN and re-encodes the clip; Add soundtrack lays a track from the Music tab under it. Both produce new files next to the original.",
+            "Clips are in outputs/ (<timestamp>_seed<seed>.mp4, _up<px>.mp4, _music.mp4) and in History under kind = video.",
+        ], numbered=True),
+        H2("4.15 Generating a music track", "s4-15"),
+        bullets([
+            "Open the Music tab. Describe genre, mood, instruments and tempo; the chips add common genres and moods.",
+            "Pick the model (MusicGen stereo medium by default), the length (3 to 30 s), guidance, temperature and optionally a seed.",
+            "Press Generate music. MusicGen loads in about 30 s (it can stay loaded next to an SDXL model) and writes the track with a progress bar; the player appears with the details below.",
+            "Tracks are 16-bit WAV files in outputs/ and appear in History under kind = music with a waveform thumbnail. The Video tab lists them in its Soundtrack box.",
+        ], numbered=True),
         H2("4.13 Development workflow", "s4-13"),
         bullets([
             "Edit a module. Self-tests: `python prompt_parser.py` prints how sample prompts are interpreted, `python models.py` lists the registry and what is on disk, `python registry.py` prints the registry file, `python downloads.py <source>` inspects a source, `python sysinfo.py` dumps the Admin data as JSON, `python db.py stats` exercises the schema.",
-            "Compile-check with `python -m py_compile app.py admin_ui.py models.py registry.py downloads.py prompt_parser.py sysinfo.py`.",
+            "Compile-check with `python -m py_compile app.py admin_ui.py media_ui.py media.py video_io.py models.py registry.py downloads.py prompt_parser.py sysinfo.py`. `python media.py` lists the video and music models and whether they are on disk.",
             "Restart the app. For automated checks, gradio_client can call /generate, /upscale, /refresh_history, /overview_refresh, /system_refresh, /check_source, /add_source, /save_lora and /logs_text, which is how the increments in this project were verified.",
             "Rebuild this documentation with `python docs-src\\build_pdf.py`.",
             "Commit and push: the repository is https://github.com/Fzhacking/ai-image-gen.",
@@ -647,16 +677,44 @@ def sec_modules():
           "--seed, --count, --model (key, repo id or path), --lora NAME[:WEIGHT] (repeatable), --out, --list-models. "
           "Uses the same ModelManager, so weighting, samplers and LoRAs behave exactly as in the app. It does not "
           "write to the database."),
+        H2("5.14 media.py (about 330 lines)", "s5-14"),
+        P("The video and music engine. PROFILES describes each architecture (ltx, wan, musicgen, stable_audio): kind, fps and "
+          "frame-count rule, maximum length, default steps and guidance, negative prompt, VRAM need and whether image-to-video is "
+          "supported. arch_of() reads the repo's model_index.json or config.json (cached) so admin-added repos get the right loader; "
+          "profile_for() merges the registry's steps and guidance; repo_allow_patterns() limits a download to the diffusers sub-folders "
+          "(the LTX repo carries 250 GB of single-file checkpoints at its root) or to the transformers files of MusicGen; "
+          "frames_for() rounds a length in seconds to 8k+1 (LTX) or 4k+1 (Wan) frames."),
+        bullets([
+            "MediaManager(lock): one loaded video or music model. load() dispatches to _load_ltx, _load_wan, _load_musicgen or _load_stable_audio; each diffusers part is loaded with device_map onto the GPU shard by shard, because the fp32 text encoders (19 to 23 GB on disk) do not fit the machine's free RAM. _text_encoder() converts to bf16 on the first load and saves a copy under models/cache/<key>-text_encoder-bf16/ for later loads, and can quantise to 8-bit with bitsandbytes (Wan on 24 GB cards).",
+            "generate_video(prompt, negative, width, height, frames, steps, guidance, seed, image, on_step): returns PIL frames. LTX uses frame_rate 24, decode_timestep 0.03 and decode_noise_scale 0.025, VAE tiling, and an LTXImageToVideoPipeline built from the same components when a start image is given. Wan uses the UniPC scheduler with flow_shift 3.0 (480p) and an fp32 VAE.",
+            "generate_music(prompt, negative, seconds, guidance, temperature, seed, on_progress): returns (samples, sample_rate). MusicGen runs in fp16 with do_sample, guidance_scale and max_new_tokens = seconds x 50; a StoppingCriteria reports token progress. Stable Audio calls the diffusers pipeline with audio_end_in_s.",
+            "prepare_for(spec, image_manager, media_manager): the GPU rule. Loading an image model unloads a video model (and a music model if the image model is one of the big flow models); loading a video model unloads the image model; loading a music model unloads the image model only when free VRAM is below the music model's need plus 2 GB.",
+        ]),
+        H2("5.15 media_ui.py (about 420 lines)", "s5-15"),
+        bullets([
+            "generate_video(): resolves the model, size, frame count and seed, crops the optional start image, takes the GPU lock, loads through prepare_for(), generates with step progress, encodes the MP4 with video_io.write_mp4, records the row (kind video, width, height, frames, fps, duration_s plus the usual telemetry) and returns the player value, the details report, a state dict and the upscale bar.",
+            "upscale_video(state, target_px): reads the current clip frame by frame, runs the compact video upscaler (video_upscaler(): realesr-general-x4v3 through the same Upscaler class, one x4 pass plus a resample) on each frame and streams the result into a new MP4 (crf 18), keeping the sound track if one was added; updates the upscale columns of the record.",
+            "add_soundtrack(state, track): muxes a track from the Music tab under the current clip with a one-second fade-out; stored in soundtrack_path.",
+            "generate_music(): the same shape for tracks (kind music, duration_s, sample_rate), written as 16-bit WAV.",
+            "video_defaults() / music_defaults(): fill steps, guidance, negative prompt, maximum length and the start-image box when the model box changes. build_video_tab() and build_music_tab() lay the tabs out and wire the events; refresh_*_choices() update the model and track boxes when a tab is opened.",
+        ]),
+        H2("5.16 video_io.py (about 190 lines)", "s5-16"),
+        bullets([
+            "write_mp4(frames, path, fps, crf, audio): pipes raw RGB frames into the bundled ffmpeg (libx264, yuv420p, faststart) so a 4K clip is never held in memory; read_frames(path) yields PIL frames with the clip's metadata; probe(), video_thumbnail(), mux_audio().",
+            "write_wav(samples, sample_rate, path) through soundfile (peak-normalised when needed); write_mp3(); waveform_png() draws the History thumbnail with the studio's pink-to-yellow gradient; audio_seconds().",
+        ]),
         H2("5.13 Supporting files", "s5-13"),
         table(["File", "Purpose"], [
             ["requirements.txt", "Python dependencies with the note on installing the CUDA PyTorch build first"],
             ["run-app.bat", "Double-click launcher that runs app.py inside the virtual environment"],
             ["README.md", "User-facing quick start, model table, prompt reference, Admin and Docker sections"],
-            ["Dockerfile, docker-compose.yml, .dockerignore", "Container image and service definition (section 11)"],
-            ["models/RealESRGAN_x4plus.pth", "Upscaler weights"],
+            ["Dockerfile, docker-compose.yml, .dockerignore", "Container image and service definition (section 12)"],
+            ["models/RealESRGAN_x4plus.pth", "Upscaler weights for images"],
+            ["models/realesr-general-x4v3.pth", "Compact Real-ESRGAN weights for video frames (4.7 MB, fetched on the first video upscale)"],
             ["models/checkpoints/, models/loras/", "Checkpoints and LoRAs, filled by the Admin panel or by hand"],
             ["models/registry.json", "Admin registry: settings, model overrides and additions, LoRA metadata (created on first edit, not in git)"],
-            ["outputs/.thumbs/", "Thumbnail cache for the History grid"],
+            ["outputs/.thumbs/", "Thumbnail cache for the History grid (JPEG for images and first frames of videos, PNG waveforms for tracks)"],
+            ["models/cache/<key>-text_encoder-bf16/", "bf16 copies of the video models' text encoders, written on the first load (not in git)"],
             ["docs/", "This documentation set as PDFs"],
             ["docs-src/build_pdf.py, docs-src/images/", "Source of this documentation and its figures"],
         ], [1.6, 3.2]),
@@ -911,6 +969,17 @@ def sec_database():
             ["upscale_passes", "INTEGER", "Number of x4 passes (1 or 2)"],
             ["upscaler", "TEXT", "Architecture and weight file name"],
         ], [1.2, 0.8, 3]),
+        H3("Video and music (v2.2)"),
+        table(["Column", "Type", "Meaning"], [
+            ["kind", "TEXT", "image, video or music; NULL on rows written before v2.2 means image. image_path holds the .mp4 or .wav for the other kinds"],
+            ["duration_s", "REAL", "Length of the clip or track in seconds"],
+            ["fps", "REAL", "Frames per second of a clip (24 for LTX-Video, 16 for Wan)"],
+            ["frames", "INTEGER", "Number of frames in a clip"],
+            ["sample_rate", "INTEGER", "Sample rate of a track (32000 for MusicGen, 44100 for Stable Audio)"],
+            ["soundtrack_path", "TEXT", "The _music.mp4 written when a track was laid under the clip"],
+        ], [1.2, 0.8, 3]),
+        P("db.counts_by_kind() returns count, today, GPU seconds and total duration per kind; fetch_filtered() takes a kind "
+          "filter; stats_by_model() counts clips and tracks like images (the Admin table calls the column uses)."),
         H3("Catch-all"),
         table(["Column", "Type", "Meaning"], [
             ["extra_json", "TEXT", "JSON of any record keys that have no column, for forward compatibility"],
@@ -1025,12 +1094,89 @@ def sec_admin():
     ]
 
 
+def sec_media():
+    return [
+        H1("10. Video and Music", "s10"),
+        H2("10.1 Overview", "s10-1"),
+        P("Version 2.2 adds two model families next to the image families. They are ordinary registry entries, so the "
+          "Admin panel lists, edits, downloads, loads and unloads them like any image model, and the Add tab accepts any "
+          "LTX-Video, Wan, MusicGen or Stable Audio repository. They are used from their own tabs because their controls "
+          "(length, frame rate, start image, temperature) have no meaning for images."),
+        table(["Model", "Key", "Family", "Loader", "Output", "Limits", "Download"], [
+            ["LTX-Video 2B (Lightricks)", "ltx", "video", "ltx", "24 fps H.264 MP4", "2 to 10 s; 768x512, 512x768, 832x480, 480x832, 1024x576, 576x1024; text- and image-to-video", "28 GB"],
+            ["Wan 2.1 T2V 1.3B (Wan-AI)", "wan", "video", "wan", "16 fps H.264 MP4", "2 to 6 s; same sizes, 832x480 native; text-to-video only", "29 GB"],
+            ["MusicGen stereo medium (Meta)", "musicgen", "music", "musicgen", "32 kHz stereo WAV", "3 to 30 s, instrumental", "4.1 GB"],
+            ["MusicGen stereo small", "musicgen-small", "music", "musicgen", "32 kHz stereo WAV", "3 to 30 s, instrumental", "1.3 GB"],
+            ["Stable Audio Open 1.0 (Stability AI)", "stable-audio", "music", "stable_audio", "44.1 kHz stereo WAV", "3 to 47 s; gated repo, needs a Hugging Face token; untested on the development machine", "5.3 GB"],
+        ], [1.3, 0.7, 0.5, 0.6, 0.9, 1.9, 0.6]),
+        P("The loader column is the architecture media.py detects from the repository (model_index.json for diffusers "
+          "pipelines, config.json model_type for MusicGen). An admin-added repo gets the same treatment, so a fine-tuned "
+          "LTX or a MusicGen melody checkpoint works without code changes."),
+        H2("10.2 The Video tab", "s10-2"),
+        bullets([
+            "Prompt and chips: the model responds to a short description of scene, motion and camera; the chips add tracking shot, drone shot, close-up, time-lapse, slow motion, golden hour, cinematic lighting, rain and fog.",
+            "Model box: LTX-Video 2B or Wan 2.1 (downloaded models first). Changing it resets steps, guidance, the negative prompt, the maximum length and shows or hides the start-image box.",
+            "Size: six presets that both models accept (multiples of 32 for LTX, 16 for Wan). Length: 2 to 10 s; the frame count is rounded to 8k+1 (LTX) or 4k+1 (Wan) frames at the model's frame rate, so 4 s is 97 frames with LTX and 65 with Wan.",
+            "Steps and guidance: LTX 40 and 3.0, Wan 30 and 5.0 by default (editable per model in Admin). Seed: -1 picks a random one; the clip's seed is in its details and History row.",
+            "Start image (LTX only): any picture, including a Studio result dragged in. It is centre-cropped and resized to the chosen size and passed to the image-to-video pipeline, which shares the loaded components.",
+            "Result: the clip plays in the result box; the details report lists timing, size, frames, fps, length, seed, file and the GPU telemetry.",
+            "Upscale video: Full HD (1920), 2K (2560) or 4K (3840) long side. Frames are read back from the MP4, run one by one through Real-ESRGAN's compact video network (realesr-general-x4v3, 1.2M parameters, fetched into models/ on first use; the x4plus image network is the fallback) with a single x4 pass and a Lanczos resample to the exact target, and streamed into a new MP4 at crf 18. A sound track already added is kept.",
+            "Add soundtrack: the box lists the tracks made in the Music tab; the chosen one is muxed under the current clip, cut to its length, with a one-second fade-out, into a new _music.mp4.",
+            "Clear resets the tab; the clip stays in outputs/ and in History.",
+        ]),
+        H2("10.3 The Music tab", "s10-3"),
+        bullets([
+            "Prompt and chips: genre, mood, instruments and tempo; chips for lo-fi hip hop, cinematic orchestral, synthwave, acoustic folk, jazz trio, techno, ambient pads, epic trailer, upbeat, melancholic, relaxing and 120 bpm.",
+            "Length 3 to 30 s with MusicGen (47 s with Stable Audio); guidance (3 by default) pulls the result towards the text; temperature (1.0) adds variety; seed as in the Video tab.",
+            "MusicGen generates 50 tokens per second of audio autoregressively, so progress is reported per token; a 15 s track is 750 decoder steps.",
+            "The negative prompt box appears only for Stable Audio; MusicGen has no such input.",
+            "Result: a player with the track and the details report; the file is a 16-bit WAV in outputs/.",
+        ]),
+        H2("10.4 Sharing one GPU", "s10-4"),
+        P("The image ModelManager and the MediaManager share one lock, so one job runs at a time, and media.prepare_for() "
+          "decides what must leave the card before a model is used:"),
+        table(["About to use", "Image model loaded", "Video model loaded", "Music model loaded"], [
+            ["An image model", "kept (swapped as usual)", "unloaded", "kept, unless the image model is Z-Image, Qwen-Image or FLUX"],
+            ["A video model", "unloaded", "swapped if different", "unloaded"],
+            ["A music model", "kept while free VRAM >= need + 2 GB, else unloaded", "unloaded", "swapped if different"],
+        ], [1, 1.3, 1.1, 1.6]),
+        P("The next image generation reloads the image model automatically, so the user never unloads anything by hand. "
+          "The header pill and the Loaded now line show both managers, and Admin > Models > Unload frees both."),
+        H2("10.5 How the models are loaded", "s10-5"),
+        bullets([
+            "The repositories ship their text encoders in fp32: T5-XXL (LTX) is 19 GB and UMT5-XXL (Wan) 23 GB on disk, more than this machine's free RAM. Every part is therefore loaded with device_map onto the GPU shard by shard in bf16, never assembled on the CPU. The first load saves a bf16 copy of the text encoder under models/cache/, which halves later load times.",
+            "LTX: T5EncoderModel + LTXVideoTransformer3DModel + AutoencoderKLLTXVideo with tiling, about 14 GB resident. Wan: UMT5EncoderModel in 8-bit on cards under 32 GB (its 11 GB bf16 form plus the fp32 VAE decode paged VRAM on the 24 GB card and took over ten minutes) + WanTransformer3DModel + fp32 AutoencoderKLWan with tiling and the UniPC scheduler (flow_shift 3.0).",
+            "MusicGen: MusicgenForConditionalGeneration in fp16 with its processor, 4.1 GB resident; Stable Audio: StableAudioPipeline in fp16.",
+            "Downloads fetch only the diffusers sub-folders (model_index.json and */*). This matters for LTX, whose repository also holds about 250 GB of single-file checkpoints for other runtimes.",
+        ]),
+        H2("10.6 Files, thumbnails and the database", "s10-6"),
+        bullets([
+            "Clips: outputs/<timestamp>_seed<seed>.mp4; upscales add _up<px>; soundtracks add _music. Tracks: outputs/<timestamp>_seed<seed>.wav.",
+            "Thumbnails in outputs/.thumbs/: the first frame (JPEG) for clips, a waveform picture (PNG) for tracks.",
+            "generations.db rows carry kind = video or music plus duration_s, fps, frames, sample_rate and soundtrack_path; the Video tab's upscale fills the usual upscale columns. The History tab filters by kind and shows the right player; Reuse prompt returns to the Video or Music tab.",
+        ]),
+        H2("10.7 Measured on the RTX 3090", "s10-7"),
+        table(["Operation", "Settings", "Time", "VRAM"], MEDIA_FIGURES, [1.6, 2, 1.2, 0.9]),
+        P("Measured on 22 October 2026 with torch 2.14.1, diffusers 0.41 and transformers 5.20. Video generation time grows "
+          "roughly linearly with frames x steps; 768x512 at 97 frames and 40 steps is the recommended quality setting and takes "
+          "about four times the 49-frame, 20-step figure."),
+        H2("10.8 Limits and tips", "s10-8"),
+        bullets([
+            "Clips are short by design (2 to 10 s). For longer sequences, generate the next clip from the last frame of the previous one (save a frame, use it as the start image) and join the files with ffmpeg.",
+            "LTX responds to specific, literal descriptions of motion; abstract prompts give static camera moves. Keep people small in frame or use close-ups; hands and faces in mid-shots are the weakest area of 2B-class models.",
+            "Wan's native size is 832x480; other sizes work but cost more time. It has no image-to-video in this 1.3B variant.",
+            "4K from a 768x512 clip is a 5x enlargement by a super-resolution network, not native detail. It is sharp and clean (Real-ESRGAN's video network, chosen over the x4plus image network because it is about 5x faster per frame and steadier between frames) but cannot invent texture that the 2B model did not render; generate at 1024x576 first when the subject allows.",
+            "MusicGen is instrumental only and best under 30 s; describe instruments and tempo rather than song titles or artists.",
+        ]),
+    ]
+
+
 def sec_performance():
     return [
-        H1("10. Performance", "s10"),
+        H1("11. Performance", "s11"),
         P("All figures were measured on the development machine (RTX 3090, 24 GB, driver 610.88, torch 2.14.1 with "
           "CUDA 12.6) and taken from generations.db and the v2.0 model sweep."),
-        H2("10.1 Generation by model (832x1216, prompt weighting on for SDXL)", "s10-1"),
+        H2("11.1 Generation by model (832x1216, prompt weighting on for SDXL)", "s11-1"),
         table(["Model", "Steps", "CFG", "Sampler", "Inference", "Peak VRAM"], [
             ["Z-Image Turbo", "8", "0", "Flow-match Euler", "8.6 s (9.8 s at 1344x768)", "18.1 GB"],
             ["Qwen-Image + Lightning (4-bit)", "8", "1 (none)", "Flow-match Euler, exp. shift", "13.4 s (13.3 to 14.2 s at 1344x768 and 1024x1024)", "18.0 GB"],
@@ -1038,7 +1184,7 @@ def sec_performance():
             ["Juggernaut XL v9", "30", "5", "DPM++ 2M Karras", "8.0 s", "13.1 GB"],
             ["RealVisXL V5.0", "30", "4", "DPM++ SDE Karras", "8.0 s", "13.2 GB"],
             ["DreamShaper XL v2 Turbo", "6", "2", "DPM++ SDE Karras", "2.0 s", "13.2 GB"],
-            ["Playground v2.5", "40", "3", "EDM DPM-Solver", "10.5 s", "13.2 GB"],
+            ["Playground v2.5", "40", "3", "EDM DPM-Solver", "11.5 s", "13.2 GB"],
             ["Animagine XL 3.1", "28", "6", "Euler a", "7.3 s", "13.2 GB"],
         ], [1.5, 0.5, 0.5, 1.2, 0.8, 0.8]),
         P("Every SDXL-family model runs at about 3.7 to 3.8 steps per second at this size. Inference time is therefore "
@@ -1047,34 +1193,34 @@ def sec_performance():
           "adherence and legible text. Loading an SDXL-family model from the local cache takes 26 to 27 s; freeing it "
           "returns resident VRAM to 0.01 GB. Measurements taken while another process holds GPU memory are not valid: "
           "with the web app resident alongside the test, Z-Image took 78 to 128 s per image because Windows paged VRAM."),
-        H2("10.2 Generation (v1.0 measurements, 1024x1024 and 16:9, SDXL base)", "s10-2"),
+        H2("11.2 Generation (v1.0 measurements, 1024x1024 and 16:9, SDXL base)", "s11-2"),
         table(["Size", "Steps", "Inference", "Steps/s", "Peak VRAM", "Temp after", "Power after"], [
-            ["1024x1024", "15", "4.7 to 4.9 s", "3.1 to 3.2", "10.5 GB", "55 to 56 C", "377 to 379 W"],
-            ["1024x1024", "30", "9.7 s", "3.1", "10.5 GB", "-", "-"],
-            ["1344x768", "40", "12.8 to 13.5 s", "3.0 to 3.1", "10.4 GB", "52 to 54 C", "349 to 357 W"],
-            ["768x1344", "40", "11.2 to 11.4 s", "3.5 to 3.6", "10.5 GB", "55 to 57 C", "382 to 385 W"],
+            ["1024x1024", "15", "4.7 to 4.9 s", "3.1 to 3.2", "11.5 GB", "55 to 56 C", "377 to 379 W"],
+            ["1024x1024", "30", "9.7 s", "3.1", "11.5 GB", "-", "-"],
+            ["1344x768", "40", "12.8 to 13.5 s", "3.0 to 3.1", "11.4 GB", "52 to 54 C", "349 to 357 W"],
+            ["768x1344", "40", "11.2 to 11.4 s", "3.5 to 3.6", "11.5 GB", "55 to 57 C", "382 to 385 W"],
         ]),
-        H2("10.3 Upscaling", "s10-3"),
+        H2("11.3 Upscaling", "s11-3"),
         table(["From", "To", "Passes", "Time", "Output file"], [
             ["1344x768", "3840x2194 (4K)", "1", "3.4 s", "9.9 MB"],
             ["768x1344", "2194x3840 (4K)", "1", "2.9 s", "7.9 MB"],
             ["768x1344", "1463x2560 (2K, Upscale bar)", "1", "3.6 s", "3.5 MB"],
             ["768x1344", "4388x7680 (8K)", "2", "8.4 to 8.5 s", "30.5 MB"],
         ]),
-        H2("10.4 Memory", "s10-4"),
+        H2("11.4 Memory", "s11-4"),
         table(["Stage", "VRAM"], [
             ["Idle with one SDXL-family model loaded", "6.6 GB allocated"],
             ["Idle with Z-Image Turbo loaded (bf16 transformer + 8-bit text encoder)", "15.8 GB allocated"],
             ["Idle with Qwen-Image loaded (NF4 transformer + 4-bit text encoder + Lightning LoRA)", "17.5 GB allocated"],
             ["Peak during Qwen-Image generation at 1 MP (VAE tiling on)", "18.0 GB; 21.7 GB before VAE tiling, which caused paging"],
             ["Peak during Z-Image generation at 1344x768", "18.1 GB"],
-            ["Peak during 1 MP generation, plain prompt", "10.4 to 10.5 GB"],
+            ["Peak during 1 MP generation, plain prompt", "11.4 to 10.5 GB"],
             ["Peak during 832x1216 generation with compel embeddings", "13.1 to 13.2 GB"],
             ["After unload", "0.01 GB"],
             ["Upscaler weights", "67 MB (half precision)"],
             ["Peak during tiled upscale", "no measurable increase over the generation peak"],
         ], [2.5, 2]),
-        H2("10.5 Startup and switching", "s10-5"),
+        H2("11.5 Startup and switching", "s11-5"),
         table(["Step", "Time"], [
             ["First ever start (downloads 6.7 GB)", "bandwidth dependent; the five fine-tunes downloaded in 76 to 184 s each on the development connection"],
             ["SDXL load from local cache at start", "34 to 59 s (disk cache dependent)"],
@@ -1086,7 +1232,7 @@ def sec_performance():
             ["Upscaler load", "under 1 s"],
             ["Admin panel refresh", "about 3 s first, 0.7 s after"],
         ], [2, 2.5]),
-        H2("10.6 Tuning levers", "s10-6"),
+        H2("11.6 Tuning levers", "s11-6"),
         bullets([
             "Model: Z-Image Turbo gives a finished photoreal image in 9 s; DreamShaper Turbo gives a rougher draft in 2 s. For SDXL-specific looks or LoRAs, regenerate the chosen seed with Juggernaut or RealVis.",
             "Steps: the dominant cost for every model. `quick` halves them; `highly detailed` adds a third.",
@@ -1099,13 +1245,13 @@ def sec_performance():
 
 def sec_docker():
     return [
-        H1("11. Deployment and Docker", "s11"),
-        H2("11.1 Image", "s11-1"),
+        H1("12. Deployment and Docker", "s12"),
+        H2("12.1 Image", "s12-1"),
         P("The Dockerfile builds on `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04`, installs Python 3.12, PyTorch and "
           "torchvision for CUDA 12.6, then requirements.txt, and copies the Python sources. The Hugging Face cache is "
           "pointed at /cache/huggingface, Gradio is told to bind 0.0.0.0:7860, and FRAZILE_IN_DOCKER=1 stops the app "
           "from trying to open a browser. A health check polls the root page every 30 s after a 3-minute start grace."),
-        H2("11.2 Compose service", "s11-2"),
+        H2("12.2 Compose service", "s12-2"),
         table(["Setting", "Value", "Why"], [
             ["ports", "7860:7860", "The studio on http://localhost:7860"],
             ["volumes", "./outputs, ./models, ./generations.db, hf-cache", "Images, your checkpoints and LoRAs, the history database, and the downloaded models all live outside the container"],
@@ -1114,7 +1260,7 @@ def sec_docker():
             ["shm_size", "2 GB", "Shared memory for data loaders"],
             ["restart", "unless-stopped", "Comes back after a reboot of the host"],
         ], [1.4, 1.6, 2]),
-        H2("11.3 Host requirements", "s11-3"),
+        H2("12.3 Host requirements", "s12-3"),
         table(["Host", "Needs"], [
             ["Windows 11", "WSL 2 (`wsl --install`, reboot), Docker Desktop with the WSL 2 backend, the normal NVIDIA Windows driver. GPU support is built into Docker Desktop; no extra toolkit."],
             ["Linux", "Docker Engine, the NVIDIA driver, nvidia-container-toolkit configured as a Docker runtime."],
@@ -1122,14 +1268,14 @@ def sec_docker():
         P("The development machine has neither WSL nor Docker installed, so the image has been written and reviewed "
           "but not built or run there. The first build on any machine downloads several GB of Python packages and "
           "should be run on a fast connection."),
-        H2("11.4 Commands", "s11-4"),
+        H2("12.4 Commands", "s12-4"),
         code("docker compose build            # build the image\n"
              "docker compose up               # run in the foreground\n"
              "docker compose up -d            # run detached\n"
              "docker compose logs -f          # follow the app log\n"
              "docker compose down             # stop; keeps the hf-cache volume\n"
              "docker compose down -v          # stop and delete cached models"),
-        H2("11.5 Differences inside the container", "s11-5"),
+        H2("12.5 Differences inside the container", "s12-5"),
         bullets([
             "Paths in the database are container paths (/app/outputs/...). Mount the same folders when moving between native and container use, or the History tab shows \"not found\" for the other side's files.",
             "The Admin panel's CPU, memory and network sections describe the container's view; GPU and power still come from the host driver through nvidia-smi.",
@@ -1141,8 +1287,8 @@ def sec_docker():
 
 def sec_operations():
     return [
-        H1("12. Operations and Troubleshooting", "s12"),
-        H2("12.1 Starting and stopping", "s12-1"),
+        H1("13. Operations and Troubleshooting", "s13"),
+        H2("13.1 Starting and stopping", "s13-1"),
         table(["Action", "How"], [
             ["Start", "Double-click run-app.bat, or `.\\.venv\\Scripts\\python.exe app.py` in the project folder; or `docker compose up`"],
             ["Confirm ready", "Console shows \"SDXL base 1.0 ready in N s\", \"Upscaler ready\", \"Running on local URL: http://127.0.0.1:7860\""],
@@ -1150,13 +1296,13 @@ def sec_operations():
             ["Change port or address", "Set GRADIO_SERVER_PORT or GRADIO_SERVER_NAME before starting; FRAZILE_NO_BROWSER=1 suppresses the browser tab"],
             ["Expose on the LAN", "GRADIO_SERVER_NAME=0.0.0.0. There is no authentication, so only do this on a trusted network"],
         ], [1, 3.5]),
-        H2("12.2 Logs", "s12-2"),
+        H2("13.2 Logs", "s13-2"),
         P("The app prints one line per loaded model, per generated image and per upscale, for example:"),
         code("Loading Juggernaut XL v9 ...\nJuggernaut XL v9 ready in 26.3s  (scheduler: DPM++ 2M Karras)\n"
              "#12 juggernaut saved 20261022-101040_seed1746058488.png  832x1216  8.0s  peak 13.1 GB  56.0 C\n"
              "#12 upscaled -> 1463x2560 in 3.56s"),
         P("To keep a log file, redirect: `.\\.venv\\Scripts\\python.exe -u app.py > app.log 2>&1`. Inside Docker use `docker compose logs -f`."),
-        H2("12.3 Known issues encountered during development and their fixes", "s12-3"),
+        H2("13.3 Known issues encountered during development and their fixes", "s13-3"),
         table(["Symptom", "Cause", "Fix applied"], [
             ["AttributeError: 'StableDiffusionXLPipeline' object has no attribute 'enable_vae_slicing'", "diffusers 0.41 removed the pipeline-level helper", "Call pipe.vae.enable_slicing() instead"],
             ["Parser ignored \"seed 42\" and misread \"21:9 steps 45\" as 9 steps", "Directive removal used offsets from a stale lowercase copy of the prompt", "Rewrote removal to search and cut the live prompt string each time"],
@@ -1173,8 +1319,12 @@ def sec_operations():
             ["UnicodeEncodeError when printing reports from scripts", "Windows console code page cp1252 cannot print the arrow and dot characters", "Set PYTHONIOENCODING=utf-8 when printing reports; the browser is unaffected"],
             ["torchvision installed as the CPU build", "pip pulled torchvision from PyPI before the CUDA index was consulted", "Reinstalled from the cu126 index; requirements.txt documents the order"],
         ], [1.6, 1.6, 1.6]),
-        H2("12.4 Troubleshooting guide", "s12-4"),
+        H2("13.4 Troubleshooting guide", "s13-4"),
         table(["Problem", "Check", "Resolution"], [
+            ["Video generation says Out of VRAM", "Choose a smaller size or a shorter clip; 1024x576 at 10 s is the practical limit of a 24 GB card. Unload the image model in Admin > Models if it is still resident."],
+            ["The Video tab is slow to start the first time", "The first load converts the 19 GB fp32 text encoder to bf16 and writes a copy under models/cache/; later loads take about a minute."],
+            ["No sound in a clip with a soundtrack", "The soundtrack is a separate _music.mp4 file; the player shows it after Add soundtrack. Upscaling after that keeps the audio; upscaling before it does not add any."],
+            ["MusicGen output is silent or noisy", "Raise the length (very short tracks are mostly intro), lower the temperature towards 0.9, keep guidance at 3; a different seed changes the arrangement entirely."],
             ["\"CUDA GPU not available\" at startup", "`python -c \"import torch; print(torch.version.cuda)\"` prints None", "Reinstall torch from the cu126 index inside the virtual environment"],
             ["Port 7860 already in use", "Task Manager shows a python.exe from a previous run", "End that process, or set GRADIO_SERVER_PORT"],
             ["\"Unknown model 'x'\" in the preview line", "Typo, or a checkpoint added without restarting", "Use a key from the Models accordion; restart after adding files to models/checkpoints/"],
@@ -1192,7 +1342,7 @@ def sec_operations():
             ["Browser slow to show an 8K result", "30 MB PNG transfer", "Expected; open the file from outputs/ directly"],
             ["docker compose fails with \"could not select device driver\"", "GPU support not enabled in Docker", "Install WSL 2 and Docker Desktop (Windows) or nvidia-container-toolkit (Linux)"],
         ], [1.4, 1.6, 1.8]),
-        H2("12.5 Maintenance", "s12-5"),
+        H2("13.5 Maintenance", "s13-5"),
         bullets([
             "Outputs grow by 1.5 MB per native image and 3 to 31 MB per upscaled image. Prune outputs/ periodically; the History tab will show \"not found\" for deleted files. The Admin panel shows the folder size.",
             "Each built-in model is 6.5 GB in the Hugging Face cache. Delete a models--* folder there to reclaim space; it downloads again on next use.",
@@ -1200,7 +1350,7 @@ def sec_operations():
             "To reset history, stop the app and delete generations.db; it is recreated empty on next start.",
             "To update dependencies, upgrade inside the virtual environment and rerun the parser self-test, models.py, sysinfo.py and one generation per family. Pin versions in requirements.txt if a breaking change is found.",
         ]),
-        H2("12.6 Security notes", "s12-6"),
+        H2("13.6 Security notes", "s13-6"),
         bullets([
             "The server listens on localhost only by default and has no authentication. The Docker image binds all interfaces inside the container; the compose file publishes the port on the host, so treat that like a LAN exposure.",
             "No telemetry or prompts are sent anywhere. Network access is limited to model downloads from Hugging Face and the optional reachability check in the Admin panel, which only opens a TCP connection.",
@@ -1214,8 +1364,8 @@ def sec_operations():
 
 def sec_changelog():
     return [
-        H1("13. Change Log and Roadmap", "s13"),
-        H2("13.1 Change log", "s13-1"),
+        H1("14. Change Log and Roadmap", "s14"),
+        H2("14.1 Change log", "s14-1"),
         H3("Increment 1: command-line generator (21 Oct 2026)"),
         bullets([
             "Created the project folder, virtual environment, and requirements.txt; installed torch 2.14.1+cu126, diffusers 0.41, transformers, accelerate.",
@@ -1279,9 +1429,25 @@ def sec_changelog():
         ]),
         H3("Documentation 2.1 (22 Oct 2026)"),
         bullets(["This document set: Admin panel section rewritten around management, module reference for the six new modules, requirements FR-21 to FR-25 and NFR-11 to NFR-12, workflows for adding and managing models."]),
-        H2("13.2 Roadmap", "s13-2"),
+        H3("Increment 12: video and music (22 Oct 2026)"),
+        bullets([
+            "Two new model families, video and music, with five built-in models: LTX-Video 2B, Wan 2.1 T2V 1.3B, MusicGen stereo medium and small, Stable Audio Open 1.0 (gated, untested). They appear in Admin > Models like image models, download to the Hugging Face cache (sub-folders only), and can be added from any LTX, Wan, MusicGen or Stable Audio repo through Admin > Add, which now recognises those pipeline classes and the transformers layout.",
+            "media.py: MediaManager with loaders that stream every part straight onto the GPU in bf16 and cache a bf16 copy of the 19 to 23 GB fp32 text encoders; generate_video() and generate_music(); prepare_for() decides which of the image, video or music models must leave the card.",
+            "Video tab (media_ui.py): six sizes, 2 to 10 s, steps, guidance, seed, start image for image-to-video, camera chips, examples; Upscale video runs Real-ESRGAN's compact video network over every frame and streams the result into a new MP4; Add soundtrack muxes a generated track under the clip.",
+            "Music tab: MusicGen with length, guidance, temperature and seed, genre chips, examples, token-level progress; tracks saved as 16-bit WAV.",
+            "video_io.py: ffmpeg from the imageio-ffmpeg wheel (no system install), streamed H.264 encoding, frame reading, thumbnails, audio muxing with fade-out, WAV writing and waveform pictures.",
+            "History: kind filter and column, first-frame and waveform thumbnails, inline video and audio players, Reuse prompt returns to the tab that made the entry. Database columns kind, duration_s, fps, frames, sample_rate, soundtrack_path; counts_by_kind().",
+            "Admin: Overview tiles for images / videos / tracks and seconds of media, Loaded now shows both managers, Load now and Unload work for video and music models, model status shows fps, limits and image-to-video support; the header pill shows both loaded models.",
+            "Verified on the RTX 3090 through the Gradio API: see section 10.7 for the measured figures.",
+        ]),
+        H3("Documentation 2.2 (22 Oct 2026)"),
+        bullets(["This document set: new section 10 (Video and Music), later sections renumbered, module reference for media.py, media_ui.py and video_io.py, requirements FR-26 to FR-29 and NFR-13 to NFR-14, workflows 4.14 and 4.15, database columns, change log."]),
+        H2("14.2 Roadmap", "s14-2"),
         table(["Priority", "Item", "Notes"], [
             ["High", "Image-to-image and inpainting", "Same pipeline family; lets a chosen image be edited rather than regenerated; the ModelManager already shares components"],
+            ["High", "Longer and higher-resolution video", "LTX-Video 13B distilled (needs the 24 GB card alone, fp8), Wan 2.2 5B at 720p, and clip extension by feeding the last frame back as a start image"],
+            ["Medium", "Lyrics and vocals", "ACE-Step or YuE for songs with vocals; both need their own packages and 8 to 16 GB of VRAM"],
+            ["Medium", "Video LoRAs and camera-control LoRAs for LTX", "The LoRA registry already knows families; a video family entry would route them"],
             ["High", "Character consistency with IP-Adapter or reference images", "Keeps a subject's identity across prompts; the usual next step after LoRAs"],
             ["High", "Test the Docker image on a host with WSL 2 and Docker Desktop", "Written and reviewed but unbuilt on the development machine"],
             ["Medium", "FLUX.1 dev and ControlNet", "dev is gated and non-commercial; ControlNet gives pose and depth control"],
@@ -1306,6 +1472,9 @@ def sec_appendix():
              "  ui_theme.py            colours, Gradio theme, CSS\n"
              "  ui_common.py           shared UI helpers (choices, header, cards, tiles)\n"
              "  applog.py              in-memory log for the Logs tab\n"
+             "  media.py               video and music engine: profiles, MediaManager, GPU coordination\n"
+             "  media_ui.py            Video and Music tabs\n"
+             "  video_io.py            ffmpeg / WAV helpers: MP4 encoding, thumbnails, muxing, waveforms\n"
              "  models.py              model registry, ModelManager, LoRAs, compel\n"
              "  prompt_parser.py       prompt -> settings\n"
              "  sysinfo.py             system telemetry for the Admin panel\n"
@@ -1382,6 +1551,25 @@ def sec_appendix():
     ]
 
 
+MEDIA_FIGURES = [
+    ["LTX-Video 2B, first load", "fp32 to bf16 conversion of T5-XXL, bf16 copy written to models/cache/", "186 s", "14.2 GB resident"],
+    ["LTX-Video 2B, later loads", "from the bf16 copy (inside the app)", "94 s", "14.2 GB resident"],
+    ["LTX text-to-video", "768x512, 89 frames (3.7 s), 30 steps, through the app", "29.9 s + 1 s encode", "15.5 GB peak"],
+    ["LTX text-to-video", "768x512, 49 frames (2 s), 20 steps", "11.4 s", "17.0 GB reserved"],
+    ["LTX image-to-video", "768x512, 65 frames (2.7 s), 20 steps, from a 4K Studio PNG, through the app", "15.7 s", "14.9 GB peak"],
+    ["LTX image-to-video", "768x512, 49 frames, 20 steps", "12.9 s", "15.3 GB peak"],
+    ["Wan 2.1 1.3B, first load", "UMT5-XXL converted to bf16 and cached, then quantised to 8-bit", "266 s", "11.1 GB resident"],
+    ["Wan 2.1 1.3B, later loads", "bf16 copy quantised to 8-bit", "164 s", "11.1 GB resident"],
+    ["Wan text-to-video", "832x480, 49 frames (3 s), 30 steps, UniPC", "205 s (about 6 s per step)", "12.9 GB peak"],
+    ["Video upscale to 4K", "65 frames 768x512 to 3840x2560, compact Real-ESRGAN, one pass + resample, H.264 crf 18", "49 s (0.76 s per frame)", "under 1 GB extra"],
+    ["Video upscale to 4K (fallback)", "same clip with the x4plus image network", "135 s one pass, 204 s two passes", "under 1 GB extra"],
+    ["Soundtrack mux", "10 s WAV under a 2.7 s clip, AAC, fade-out", "0.4 s", "none"],
+    ["MusicGen stereo medium, load", "fp16, from the Hugging Face cache", "24 to 27 s", "4.1 GB resident"],
+    ["MusicGen stereo medium, track", "10 s, guidance 3, temperature 1.0, through the app", "36 s", "4.2 GB peak"],
+    ["MusicGen stereo medium, track", "6 s, guidance 3", "23.6 s", "4.6 GB reserved"],
+    ["Image after a video", "Juggernaut XL v9 reloaded automatically after LTX-Video was unloaded", "31 s load + 5.0 s image", "10.4 GB peak"],
+]
+
 SECTIONS = [
     ("01-Project-Overview", "1. Project Overview", sec_overview),
     ("02-Requirements", "2. Requirements", sec_requirements),
@@ -1392,11 +1580,12 @@ SECTIONS = [
     ("07-Prompt-Language-Reference", "7. Prompt Language Reference", sec_prompt),
     ("08-Database-Schema", "8. Database", sec_database),
     ("09-Admin-Panel", "9. Admin Panel", sec_admin),
-    ("10-Performance", "10. Performance", sec_performance),
-    ("11-Deployment-and-Docker", "11. Deployment and Docker", sec_docker),
-    ("12-Operations-and-Troubleshooting", "12. Operations and Troubleshooting", sec_operations),
-    ("13-Change-Log-and-Roadmap", "13. Change Log and Roadmap", sec_changelog),
-    ("14-Appendix", "Appendix", sec_appendix),
+    ("10-Video-and-Music", "10. Video and Music", sec_media),
+    ("11-Performance", "11. Performance", sec_performance),
+    ("12-Deployment-and-Docker", "12. Deployment and Docker", sec_docker),
+    ("13-Operations-and-Troubleshooting", "13. Operations and Troubleshooting", sec_operations),
+    ("14-Change-Log-and-Roadmap", "14. Change Log and Roadmap", sec_changelog),
+    ("15-Appendix", "Appendix", sec_appendix),
 ]
 
 

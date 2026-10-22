@@ -24,10 +24,25 @@ HEAVY_NOTE = {"zimage": "no negative prompt, no LoRA weighting", "qwen": "4-bit,
 
 def model_choices() -> list[tuple[str, str]]:
     out = [("Auto (pick by style words in the prompt)", "auto")]
-    for m in models.all_models():
+    for m in models.all_models(kind="image"):
         disk = "" if models.is_downloaded(m) else f"  ·  not downloaded (~{m.download_gb:g} GB)"
         out.append((f"{m.name}  -  {m.description}{disk}", m.key))
     return out
+
+
+def media_choices(kind: str) -> list[tuple[str, str]]:
+    """Video or music models for the Video / Music tab dropdowns (downloaded ones first)."""
+    out = []
+    for m in sorted(models.all_models(kind=kind), key=lambda m: (not models.is_downloaded(m), m.name.lower())):
+        disk = "" if models.is_downloaded(m) else f"  ·  not downloaded (~{m.download_gb:g} GB)"
+        out.append((f"{m.name}  -  {m.description}{disk}", m.key))
+    return out
+
+
+def media_choice_update(kind: str, value: str | None = None):
+    choices = media_choices(kind)
+    keys = [v for _, v in choices]
+    return gr.update(choices=choices, value=value if value in keys else (keys[0] if keys else None))
 
 
 def lora_choices(family: str | None = None) -> list[tuple[str, str]]:
@@ -54,16 +69,20 @@ def lora_choice_update(value: list[str] | None = None):
 
 # ----------------------------------------------------------------------------- header
 
-def header_html(static_gpu: dict, manager, jobs_active: int = 0) -> str:
+def loaded_names(manager, media=None) -> str:
+    names = [m.spec.name for m in (manager, media) if m is not None and getattr(m, "spec", None)]
+    return " + ".join(names) if names else "no model loaded"
+
+
+def header_html(static_gpu: dict, manager, jobs_active: int = 0, media=None) -> str:
     live = gpu_info.snapshot()
-    spec = manager.spec
     used, total = live.get("mem_used_mb"), live.get("mem_total_mb")
     temp = live.get("temperature_c")
     temp_status = "good" if temp is None or temp < 70 else "warning" if temp < 83 else "serious" if temp < 90 else "critical"
     dot = STATUS[temp_status][0]
     pills = [
         f'<span class="fz-pill live"><span class="dot" style="background:{dot}"></span>'
-        f'<b>{escape(spec.name) if spec else "no model loaded"}</b></span>',
+        f'<b>{escape(loaded_names(manager, media))}</b></span>',
         f'<span class="fz-pill live">VRAM <b>{(used or 0) / 1024:.1f}</b> / {(total or 0) / 1024:.0f} GB'
         f' · <b>{temp if temp is not None else "?"}</b> °C · {live.get("gpu_util_pct") or 0:.0f} %</span>',
     ]
@@ -79,18 +98,23 @@ def header_html(static_gpu: dict, manager, jobs_active: int = 0) -> str:
     <div class="fz-mark">F</div>
     <div>
       <div class="fz-logo">Frazile <span>AI</span></div>
-      <div class="fz-tag">Image Studio · Z-Image, SDXL fine-tunes, Qwen-Image, FLUX, LoRAs and Real-ESRGAN on your own GPU</div>
+      <div class="fz-tag">Image Studio · images, video and music on your own GPU: Z-Image, SDXL fine-tunes, Qwen-Image, FLUX, LoRAs, LTX-Video, Wan 2.1, MusicGen, Real-ESRGAN</div>
     </div>
   </div>
   <div class="fz-sys">{''.join(pills)}</div>
 </div>"""
 
 
-def loaded_line(manager, upscaler_name: str) -> str:
+def loaded_line(manager, upscaler_name: str, media=None) -> str:
     spec = manager.spec
-    if not spec:
+    parts = []
+    if spec:
+        parts.append(f"**{spec.name}** · {manager.scheduler_name}")
+    if media is not None and media.spec:
+        parts.append(f"**{media.spec.name}** ({media.kind})")
+    if not parts:
         return f"Loaded now: **nothing** (the first generation loads a model) · upscaler {upscaler_name}"
-    return f"Loaded now: **{spec.name}** · {manager.scheduler_name} · upscaler {upscaler_name}"
+    return "Loaded now: " + " + ".join(parts) + f" · upscaler {upscaler_name}"
 
 
 # ----------------------------------------------------------------------------- model cards
@@ -98,7 +122,7 @@ def loaded_line(manager, upscaler_name: str) -> str:
 def model_cards_html(manager) -> str:
     by_model = {r["model_id"]: r for r in db.stats_by_model()}
     cards = []
-    for m in models.all_models():
+    for m in models.all_models(kind="image"):
         on_disk = models.is_downloaded(m)
         st = by_model.get(m.source)
         active = manager.spec is not None and manager.spec.key == m.key
@@ -113,9 +137,10 @@ def model_cards_html(manager) -> str:
         )
     loras = registry.lora_entries(include_missing=False)
     lora_line = ", ".join(f"<code>&lt;lora:{escape(s)}&gt;</code>" + (f" ({escape(e['trigger'])})" if e.get("trigger") else "") for s, e in loras.items() if e.get("enabled", True)) or "none yet"
+    media_line = ", ".join(f"{escape(m.name)} <i>({m.family})</i>" for m in models.all_models() if models.kind_of(m.family) != "image") or "none"
     return (f'<div class="fz-cards">{"".join(cards)}</div>'
             f'<div class="fz-note"><b>LoRAs:</b> {lora_line}. Add models and LoRAs in <b>Admin › Add</b>; '
-            f'their trigger words appear in the LoRAs box.</div>')
+            f'their trigger words appear in the LoRAs box.<br><b>Video and music models</b> (Video and Music tabs): {media_line}.</div>')
 
 
 # ----------------------------------------------------------------------------- tiles & tables

@@ -68,23 +68,24 @@ class Upscaler:
                 out[y * s: y * s + (cy1 - cy0), x * s: x * s + (cx1 - cx0)] = up[cy0:cy1, cx0:cx1]
         return Image.fromarray(out)
 
-    def upscale_to(self, img: Image.Image, long_side: int) -> tuple[Image.Image, dict]:
+    def upscale_to(self, img: Image.Image, long_side: int, max_passes: int = 8) -> tuple[Image.Image, dict]:
         """
-        Upscale until the long side is >= long_side, then resample down to exactly long_side.
+        Upscale until the long side is >= long_side, then resample to exactly long_side.
         Returns (image, info). Runs x4 passes; before a second pass the intermediate is
-        resized so the pass lands near the target instead of far beyond it.
+        resized so the pass lands near the target instead of far beyond it. With max_passes=1
+        (video frames) a single network pass is followed by a Lanczos resample up to the target.
         """
         t0 = time.perf_counter()
         cur = img
         passes = 0
-        while max(cur.size) < long_side:
+        while max(cur.size) < long_side and passes < max_passes:
             if passes > 0 and max(cur.size) * self.scale > long_side:
                 ratio = (long_side / self.scale) / max(cur.size)
                 cur = cur.resize((max(1, round(cur.width * ratio)), max(1, round(cur.height * ratio))),
                                  Image.LANCZOS)
             cur = self.upscale_once(cur)
             passes += 1
-        if max(cur.size) > long_side:
+        if max(cur.size) != long_side:
             ratio = long_side / max(cur.size)
             cur = cur.resize((round(cur.width * ratio), round(cur.height * ratio)), Image.LANCZOS)
         info = {

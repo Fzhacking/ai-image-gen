@@ -16,6 +16,12 @@ Built-in models (Hugging Face repos, downloaded on first use into the HF cache):
     flux         FLUX.1 [schnell]                    best prompt understanding, 4 steps
                                                      (gated: `huggingface-cli login` + accept
                                                      terms; ~33 GB; runs 4-bit on 24 GB cards)
+Video and music models (family "video" / "music", generated from the Video and Music tabs, see media.py):
+    ltx          LTX-Video 2B                        text/image-to-video, 24 fps, 1-2 min per clip
+    wan          Wan 2.1 T2V 1.3B                    text-to-video, 16 fps, smoother, slower
+    musicgen     MusicGen stereo medium              text-to-music, 32 kHz stereo, up to 30 s
+    musicgen-small  MusicGen stereo small            faster, lower quality
+    stable-audio Stable Audio Open 1.0               44.1 kHz, up to 47 s (gated, untested here)
 
 Local models:
     models/checkpoints/*.safetensors    any SDXL single-file checkpoint (Civitai style)
@@ -48,7 +54,7 @@ class ModelSpec:
     key: str
     name: str
     source: str                       # Hugging Face repo id or local file path
-    family: str = "sdxl"              # "sdxl" | "flux"
+    family: str = "sdxl"              # sdxl | zimage | qwen | flux (images), video, music (see registry.FAMILIES)
     steps: int = 30
     guidance: float = 7.0
     scheduler: str | None = "dpmpp_2m_karras"   # None = keep the scheduler shipped with the model
@@ -123,6 +129,44 @@ BUILTIN: list[ModelSpec] = [
                     "needs Hugging Face login, ~33 GB download",
         download_gb=33,
     ),
+    # --- video (Video tab) ---
+    ModelSpec(
+        key="ltx", name="LTX-Video 2B", source="Lightricks/LTX-Video",
+        family="video", steps=40, guidance=3.0, scheduler=None, variant=None, negative=True,
+        aliases=("ltx-video", "ltxv", "ltxvideo"),
+        description="text-to-video and image-to-video at 24 fps; 768x512 clips of 2-8 s in about a minute; ~28 GB",
+        download_gb=28,
+    ),
+    ModelSpec(
+        key="wan", name="Wan 2.1 T2V 1.3B", source="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        family="video", steps=30, guidance=5.0, scheduler=None, variant=None, negative=True,
+        aliases=("wan2.1", "wan-video", "wan21"),
+        description="text-to-video at 16 fps, 832x480; smoother motion than LTX but several minutes per clip; ~29 GB",
+        download_gb=29,
+    ),
+    # --- music (Music tab) ---
+    ModelSpec(
+        key="musicgen", name="MusicGen stereo medium", source="facebook/musicgen-stereo-medium",
+        family="music", steps=0, guidance=3.0, scheduler=None, variant=None, negative=False,
+        aliases=("musicgen-medium", "musicgen-stereo", "music-gen"),
+        description="Meta's text-to-music model, 1.5B, 32 kHz stereo, up to 30 s per track in about a minute; ~4 GB",
+        download_gb=4.1,
+    ),
+    ModelSpec(
+        key="musicgen-small", name="MusicGen stereo small", source="facebook/musicgen-stereo-small",
+        family="music", steps=0, guidance=3.0, scheduler=None, variant=None, negative=False,
+        aliases=("musicgen-s", "music-small"),
+        description="small 300M MusicGen: quick sketches in seconds, simpler arrangements; ~1.3 GB",
+        download_gb=1.3,
+    ),
+    ModelSpec(
+        key="stable-audio", name="Stable Audio Open 1.0", source="stabilityai/stable-audio-open-1.0",
+        family="music", steps=100, guidance=7.0, scheduler=None, variant=None, negative=True,
+        aliases=("stableaudio", "stable-audio-open"),
+        description="Stability AI's 44.1 kHz text-to-audio model for music loops and sound effects, up to 47 s; "
+                    "gated: needs a Hugging Face token (untested here); ~5 GB",
+        download_gb=5.3,
+    ),
 ]
 
 SCHEDULER_NAMES = {
@@ -154,12 +198,20 @@ def local_checkpoints() -> list[ModelSpec]:
     return specs
 
 
-def all_models(include_disabled: bool = False) -> list[ModelSpec]:
-    """Built-in models (with admin overrides), local checkpoints and admin-added models."""
+def kind_of(family: str) -> str:
+    """'image' | 'video' | 'music' for a model family."""
+    return family if family in ("video", "music") else "image"
+
+
+def all_models(include_disabled: bool = False, kind: str | None = None) -> list[ModelSpec]:
+    """Built-in models (with admin overrides), local checkpoints and admin-added models.
+    kind="image" | "video" | "music" keeps one kind only (None = everything)."""
     import registry
     specs = [registry.apply_overrides(m) for m in BUILTIN + local_checkpoints()]
     seen = {m.key for m in specs}
     specs += [m for m in registry.custom_models() if m.key not in seen]
+    if kind:
+        specs = [m for m in specs if kind_of(m.family) == kind]
     if include_disabled:
         return specs
     return [m for m in specs if registry.is_enabled(m.key)]
@@ -224,7 +276,7 @@ def model_for_style(style: str | None) -> ModelSpec | None:
     """The built-in model that specialises in a prompt_parser style, if any."""
     if not style:
         return None
-    for m in all_models():
+    for m in all_models(kind="image"):
         if style in m.styles:
             return m
     return None
@@ -246,7 +298,12 @@ def is_downloaded(spec: ModelSpec) -> bool:
     if not snaps.is_dir():
         return False
     big = "unet" if spec.family == "sdxl" else "transformer"
-    return any((snap / big).is_dir() and any((snap / big).glob("*.safetensors")) for snap in snaps.iterdir())
+    for snap in snaps.iterdir():
+        if (snap / big).is_dir() and any((snap / big).glob("*.safetensors")):
+            return True
+        if spec.family == "music" and (snap / "model.safetensors").exists():   # transformers layout (MusicGen)
+            return True
+    return False
 
 
 def on_disk_bytes(spec: ModelSpec) -> int:

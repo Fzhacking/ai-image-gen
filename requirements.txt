@@ -17,3 +17,6 @@ sentencepiece          # T5 tokenizer for FLUX
 protobuf               # T5 tokenizer for FLUX
 bitsandbytes>=0.45     # 4-bit FLUX on 24 GB cards
 requests               # Admin panel downloads (Civitai, direct URLs)
+imageio                # video export (Video tab)
+imageio-ffmpeg         # bundled ffmpeg binary: MP4 encoding, thumbnails, soundtrack muxing
+soundfile              # WAV export (Music tab)

@@ -88,6 +88,13 @@ NEW_COLUMNS = {
     "upscale_seconds": "REAL",
     "upscale_passes": "INTEGER",
     "upscaler": "TEXT",
+    # video and music (2.2): image_path holds the .mp4 / .wav; kind is image | video | music (NULL = image)
+    "kind": "TEXT",
+    "duration_s": "REAL",
+    "fps": "REAL",
+    "frames": "INTEGER",
+    "sample_rate": "INTEGER",
+    "soundtrack_path": "TEXT",
 }
 
 
@@ -230,7 +237,22 @@ def models_used() -> list[str]:
         return [r[0] for r in con.execute("SELECT DISTINCT model_id FROM generations WHERE model_id IS NOT NULL ORDER BY model_id")]
 
 
-def fetch_filtered(limit: int = 50, search: str = "", model_id: str | None = None, upscaled_only: bool = False) -> list[dict[str, Any]]:
+def counts_by_kind() -> dict[str, dict[str, Any]]:
+    """{'image': {'count', 'today', 'seconds', 'duration'}, 'video': ..., 'music': ...} (rows without a kind are images)."""
+    out = {k: {"count": 0, "today": 0, "seconds": 0.0, "duration": 0.0} for k in ("image", "video", "music")}
+    with connect() as con:
+        for r in con.execute(
+            "SELECT COALESCE(kind, 'image') AS k, COUNT(*) AS n, "
+            "SUM(CASE WHEN created_at >= date('now', 'localtime') THEN 1 ELSE 0 END) AS today, "
+            "ROUND(SUM(total_seconds), 1) AS seconds, ROUND(SUM(duration_s), 1) AS duration "
+            "FROM generations GROUP BY k"
+        ):
+            out[r["k"]] = {"count": r["n"] or 0, "today": r["today"] or 0, "seconds": r["seconds"] or 0.0, "duration": r["duration"] or 0.0}
+    return out
+
+
+def fetch_filtered(limit: int = 50, search: str = "", model_id: str | None = None, upscaled_only: bool = False,
+                   kind: str | None = None) -> list[dict[str, Any]]:
     where, args = [], []
     if search:
         where.append("(user_prompt LIKE ? OR final_prompt LIKE ?)")
@@ -240,6 +262,9 @@ def fetch_filtered(limit: int = 50, search: str = "", model_id: str | None = Non
         args.append(model_id)
     if upscaled_only:
         where.append("upscaled_path IS NOT NULL")
+    if kind:
+        where.append("COALESCE(kind, 'image') = ?")
+        args.append(kind)
     sql = "SELECT * FROM generations" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT ?"
     with connect() as con:
         return [dict(r) for r in con.execute(sql, [*args, limit])]

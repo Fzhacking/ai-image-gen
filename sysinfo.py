@@ -165,7 +165,7 @@ def disks() -> dict[str, Any]:
     hf_home = Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
     project = {
         "outputs": _dir_size(ROOT / "outputs"),
-        "outputs_files": sum(1 for _ in (ROOT / "outputs").glob("*.png")) if (ROOT / "outputs").exists() else 0,
+        "outputs_files": sum(1 for p in (ROOT / "outputs").iterdir() if p.suffix.lower() in (".png", ".mp4", ".wav")) if (ROOT / "outputs").exists() else 0,
         "models_dir": _dir_size(ROOT / "models"),
         "hf_cache": _dir_size(hf_home / "hub"),
         "hf_cache_path": str(hf_home / "hub"),

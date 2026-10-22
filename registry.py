@@ -35,7 +35,10 @@ FAMILIES = {
     "zimage": "Z-Image (Tongyi Z-Image Turbo and fine-tunes)",
     "qwen": "Qwen-Image",
     "flux": "FLUX.1 (dev / schnell and fine-tunes)",
+    "video": "Video (LTX-Video, Wan 2.1 in diffusers layout) — Video tab",
+    "music": "Music (MusicGen, Stable Audio Open) — Music tab",
 }
+IMAGE_FAMILIES = ("sdxl", "zimage", "qwen", "flux")      # families a LoRA can be trained for
 SCHEDULERS = {
     "dpmpp_2m_karras": "DPM++ 2M Karras",
     "dpmpp_sde_karras": "DPM++ SDE Karras",
@@ -49,6 +52,8 @@ FAMILY_PREFERRED = {
     "zimage": ("zimage",),
     "qwen": ("qwen",),
     "flux": ("flux",),
+    "video": ("ltx", "wan"),
+    "music": ("musicgen", "musicgen-small", "stable-audio"),
 }
 
 DEFAULT_SETTINGS: dict[str, Any] = {

@@ -42,7 +42,12 @@ USER_AGENT = "FrazileAI-ImageStudio/2.1"
 PIPELINE_FAMILY = {
     "StableDiffusionXLPipeline": "sdxl", "StableDiffusionXLImg2ImgPipeline": "sdxl",
     "ZImagePipeline": "zimage", "QwenImagePipeline": "qwen", "FluxPipeline": "flux",
+    "LTXPipeline": "video", "LTXImageToVideoPipeline": "video", "LTXConditionPipeline": "video",
+    "WanPipeline": "video", "WanImageToVideoPipeline": "video",
+    "StableAudioPipeline": "music",
 }
+TRANSFORMERS_FAMILY = {"musicgen": "music", "musicgen_melody": "music"}   # config.json model_type -> family
+SUPPORTED_TEXT = "SDXL, Z-Image, Qwen-Image, FLUX, LTX-Video, Wan 2.1, MusicGen or Stable Audio"
 CIVITAI_FAMILY = {  # Civitai baseModel -> our family (None = unsupported here)
     "sdxl 1.0": "sdxl", "sdxl 0.9": "sdxl", "sdxl turbo": "sdxl", "sdxl lightning": "sdxl", "sdxl hyper": "sdxl",
     "pony": "sdxl", "illustrious": "sdxl", "noobai": "sdxl", "sdxl distilled": "sdxl",
@@ -337,13 +342,37 @@ def _inspect_hf_repo(repo: str, info: dict) -> dict:
                      "download_size": sum(files[f] for f in weights) or total,
                      "summary": f"diffusers pipeline {cls or '?'} · {len(files)} files · {human_bytes(total)} total"})
         if family is None:
-            info["error"] = f"{cls or 'this pipeline'} is not supported here (SDXL, Z-Image, Qwen-Image or FLUX only)."
+            info["error"] = f"{cls or 'this pipeline'} is not supported here ({SUPPORTED_TEXT} only)."
         elif not weights:
             info["ok"] = False
             info["error"] = "The repo has no .safetensors weights (only .bin or .ckpt); the loaders read safetensors only."
+        if family in ("video", "music"):
+            # the sub-folders are what gets downloaded; LTX's repo also carries huge single-file checkpoints at its root
+            info["download_size"] = sum(files[f] for f in weights if "/" in f) or info["download_size"]
+            info["summary"] += f" · {family} model, used from the {family.capitalize()} tab"
         if mi.gated:
             info["warnings"].append("Gated repo: a Hugging Face token with accepted terms is required to download.")
         return info
+    if "config.json" in files:
+        # transformers layout (MusicGen): config.json with a model_type, weights in model.safetensors
+        try:
+            from huggingface_hub import hf_hub_download
+            cfg = json.loads(Path(hf_hub_download(repo, "config.json", token=hf_token() or None)).read_text())
+            family = TRANSFORMERS_FAMILY.get(cfg.get("model_type") or "")
+        except Exception:
+            family = None
+        if family:
+            weights = [f for f in files if f.endswith(".safetensors")]
+            info.update({"ok": bool(weights), "type": "model", "layout": "transformers", "pipeline": cfg.get("model_type"),
+                         "family": family, "variant": None, "name": repo.split("/")[-1].replace("-", " ").replace("_", " "),
+                         "download_size": sum(files[f] for f in weights) or total,
+                         "summary": f"transformers model {cfg.get('model_type')} · {len(files)} files · {human_bytes(total)} total · "
+                                    f"used from the {family.capitalize()} tab"})
+            if not weights:
+                info["error"] = "The repo has no .safetensors weights (only .bin); the loaders read safetensors only."
+            if mi.gated:
+                info["warnings"].append("Gated repo: a Hugging Face token with accepted terms is required to download.")
+            return info
     sts = sorted((f for f in files if f.lower().endswith(".safetensors")), key=lambda f: -files[f])
     if sts:
         biggest = sts[0]
@@ -532,6 +561,9 @@ def _repo_patterns(spec: ModelSpec) -> tuple[list[str] | None, list[str]]:
             ignore += ["*.fp16.*"]
     if spec.family == "qwen":
         ignore += ["text_encoder/*"]   # the 4-bit text encoder comes from diffusers/qwen-image-nf4 instead
+    if spec.family in ("video", "music"):
+        import media
+        allow = media.repo_allow_patterns(spec)
     return allow, ignore
 
 
@@ -559,6 +591,8 @@ def download_repo(spec: ModelSpec) -> Callable[[Job], str]:
             raise RuntimeError(f"{spec.source} is gated: accept the terms on huggingface.co and save a token in Admin > Settings") from e
         from fnmatch import fnmatch
         wanted = [s for s in (mi.siblings or []) if not any(fnmatch(s.rfilename, pat) or fnmatch(Path(s.rfilename).name, pat) for pat in ignore)]
+        if allow:
+            wanted = [s for s in wanted if any(fnmatch(s.rfilename, pat) for pat in allow)]
         expected = sum(s.size or 0 for s in wanted)
         already = _cache_bytes(spec.source)
         job.progress(already, max(expected, already))

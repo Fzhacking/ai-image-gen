@@ -34,6 +34,7 @@ import pandas as pd
 import applog
 import db
 import downloads
+import media
 import models
 import registry
 import sysinfo
@@ -42,13 +43,14 @@ from models import CHECKPOINTS_DIR, LORAS_DIR, ModelSpec
 from ui_common import (jobs_html, kv, loaded_line, lora_choice_update, model_choice_update, temp_status, tile)
 from ui_theme import badge, family_badge, status_span
 
-CTX = SimpleNamespace(manager=None, upscaler=None, static_gpu=None)
+CTX = SimpleNamespace(manager=None, media=None, upscaler=None, static_gpu=None)
 
-MODEL_COLUMNS = ["key", "name", "family", "type", "steps", "cfg", "sampler", "on disk", "size", "images", "avg s", "enabled", "startup"]
+MODEL_COLUMNS = ["key", "name", "family", "type", "steps", "cfg", "sampler", "on disk", "size", "uses", "avg s", "enabled", "startup"]
 LORA_COLUMNS = ["name", "file", "family", "trigger words", "weight", "size", "enabled", "uses", "source"]
-MODEL_STATS_COLUMNS = ["model", "images", "avg s", "min s", "max s", "steps/s", "avg VRAM GB", "max VRAM GB", "max °C", "upscaled", "last used"]
+MODEL_STATS_COLUMNS = ["model", "uses", "avg s", "min s", "max s", "steps/s", "avg VRAM GB", "max VRAM GB", "max °C", "upscaled", "last used"]
 SCHED_CHOICES = [(v, k) for k, v in registry.SCHEDULERS.items()]
 FAMILY_CHOICES = [(f"{k} — {v}", k) for k, v in registry.FAMILIES.items()]
+LORA_FAMILY_CHOICES = [(f"{k} — {v}", k) for k, v in registry.FAMILIES.items() if k in registry.IMAGE_FAMILIES]
 ADD_TYPES = [("Model (diffusers repo)", "model"), ("Checkpoint file (SDXL .safetensors)", "checkpoint"), ("LoRA file", "lora")]
 
 THROTTLE_BITS = {
@@ -127,14 +129,20 @@ def _activity_html(d: dict) -> str:
     active = JOBS.active()
     startup = registry.setting("startup_model")
     hf = downloads.hf_token()
+    kinds = db.counts_by_kind()
+    med = CTX.media
+    loaded = " + ".join(x for x in [mgr.spec.name if mgr.spec else "", med.spec.name if med and med.spec else ""] if x) or "none"
     tiles = "".join([
-        tile("Images today", f"{rc['today']}", "", f"{rc['week']} this week · {rc['total']} total"),
+        tile("Generations today", f"{rc['today']}", "", f"{rc['week']} this week · {rc['total']} total"),
+        tile("Images · videos · tracks", f"{kinds['image']['count']} · {kinds['video']['count']} · {kinds['music']['count']}", "",
+             f"{kinds['video']['duration']:.0f} s of video · {kinds['music']['duration']:.0f} s of music"),
         tile("GPU time, 24 h", f"{rc['gpu_seconds_24h'] / 60:.1f}", " min", f"{st.get('total_seconds') or 0:.0f} s all time"),
-        tile("Loaded model", escape(mgr.spec.name) if mgr.spec else "none", "", f"{mgr.scheduler_name or ''} · start-up: {escape(startup)}"),
-        tile("Models", f"{len(models.all_models())}", "", f"{sum(1 for m in models.all_models() if models.is_downloaded(m))} on disk · {reg['custom_models']} added · {reg['overrides']} edited"),
+        tile("Loaded now", escape(loaded), "", f"{mgr.scheduler_name or ''} · start-up: {escape(startup)}"),
+        tile("Models", f"{len(models.all_models())}", "", f"{sum(1 for m in models.all_models() if models.is_downloaded(m))} on disk · "
+             f"{len(models.all_models(kind='video'))} video · {len(models.all_models(kind='music'))} music · {reg['custom_models']} added"),
         tile("LoRAs", f"{reg['loras']}", "", f"{sum(db.lora_usage().values())} uses recorded"),
         tile("Downloads", f"{len(active)}", " active", f"{len(JOBS.jobs()) - len(active)} finished", status="warning" if active else None, status_word="running"),
-        tile("Outputs", human_bytes(pj["outputs"]), "", f"{pj['outputs_files']} PNG files · DB {human_bytes(pj['database'])}"),
+        tile("Outputs", human_bytes(pj["outputs"]), "", f"{pj['outputs_files']} files (png, mp4, wav) · DB {human_bytes(pj['database'])}"),
         tile("Hugging Face", "signed in" if hf else "no token", "", "FLUX and gated repos available" if hf else "needed for FLUX / gated repos",
              status="good" if hf else "warning", status_word="OK" if hf else "Missing"),
     ])
@@ -185,8 +193,9 @@ def model_status_html(key: str) -> str:
     mgr = CTX.manager
     disk = models.is_downloaded(m)
     st = next((r for r in db.stats_by_model() if r["model_id"] == m.source), None)
+    loaded_keys = {x.spec.key for x in (mgr, CTX.media) if x is not None and x.spec}
     bits = [family_badge(m.family), badge(_model_type(m), "off"),
-            badge("loaded now", "ok") if mgr.spec and mgr.spec.key == key else "",
+            badge("loaded now", "ok") if key in loaded_keys else "",
             badge(f"on disk · {human_bytes(models.on_disk_bytes(m))}", "ok") if disk else badge(f"not downloaded · ~{m.download_gb:g} GB", "warn"),
             badge("start-up model", "ok") if registry.setting("startup_model") == key else "",
             badge("enabled", "ok") if registry.is_enabled(key) else badge("disabled", "bad")]
@@ -198,7 +207,12 @@ def model_status_html(key: str) -> str:
     lines = [f"<div>{' '.join(b for b in bits if b)}</div>",
              f"<div style='margin-top:6px'><b>Source:</b> {src}</div>"]
     if st:
-        lines.append(f"<div><b>Usage:</b> {st['images']} images · avg {st['avg_seconds']} s · peak VRAM up to {st['max_vram_peak_gb']} GB · last {str(st['last_used'])[:16].replace('T', ' ')}</div>")
+        lines.append(f"<div><b>Usage:</b> {st['images']} generations · avg {st['avg_seconds']} s · peak VRAM up to {st['max_vram_peak_gb']} GB · last {str(st['last_used'])[:16].replace('T', ' ')}</div>")
+    if models.kind_of(m.family) != "image":
+        p = media.profile_for(m)
+        extra = (f"{p['fps']} fps · clips up to {p['max_seconds']} s · " + ("image-to-video supported" if p.get("image_to_video") else "text-to-video only")
+                 if p["kind"] == "video" else f"{p.get('sample_rate', 0) // 1000} kHz · tracks up to {p['max_seconds']} s")
+        lines.append(f"<div><b>{p['label']}</b> ({p['kind']} model, {p['kind'].capitalize()} tab): {extra}. {escape(p.get('note', ''))}</div>")
     if m.aliases:
         lines.append(f"<div><b>Also answers to:</b> {escape(', '.join(m.aliases))}</div>")
     if m.styles:
@@ -242,25 +256,40 @@ def load_model(key, progress=gr.Progress()):
     if not key:
         raise gr.Error("Select a model first.")
     spec = _find(key)
-    mgr = CTX.manager
+    mgr, med = CTX.manager, CTX.media
     progress(0, desc=f"Loading {spec.name}" + ("" if models.is_downloaded(spec) else f" (downloading ~{spec.download_gb:g} GB)"))
     t0 = time.time()
     with mgr.lock:
         try:
-            mgr.load(spec)
-        except RuntimeError as e:
+            media.prepare_for(spec, mgr, med, log=applog.log)
+            if models.kind_of(spec.family) == "image":
+                mgr.load(spec)
+            else:
+                med.load(spec)
+        except (RuntimeError, KeyError, OSError) as e:
             raise gr.Error(str(e))
     gr.Info(f"{spec.name} loaded in {time.time() - t0:.0f} s")
-    return models_df(), model_status_html(key), loaded_line(mgr, CTX.upscaler.name)
+    return models_df(), model_status_html(key), loaded_line(mgr, CTX.upscaler.name, CTX.media)
 
 
 def unload_model():
-    mgr = CTX.manager
-    name = mgr.spec.name if mgr.spec else None
+    mgr, med = CTX.manager, CTX.media
+    names = [x.spec.name for x in (mgr, med) if x is not None and x.spec]
     with mgr.lock:
         mgr.unload()
-    gr.Info(f"Unloaded {name}; VRAM freed" if name else "Nothing was loaded")
-    return models_df(), model_status_html(""), loaded_line(mgr, CTX.upscaler.name)
+        if med is not None:
+            med.unload()
+    gr.Info(f"Unloaded {', '.join(names)}; VRAM freed" if names else "Nothing was loaded")
+    return models_df(), model_status_html(""), loaded_line(mgr, CTX.upscaler.name, CTX.media)
+
+
+def _unload_if_loaded(key: str) -> None:
+    mgr, med = CTX.manager, CTX.media
+    with mgr.lock:
+        if mgr.spec and mgr.spec.key == key:
+            mgr.unload()
+        if med is not None and med.spec and med.spec.key == key:
+            med.unload()
 
 
 def download_model(key):
@@ -295,13 +324,12 @@ def reset_or_remove_model(key, unlocked):
     guard(unlocked)
     spec = _find(key)
     custom = registry.is_custom(key)
-    if CTX.manager.spec and CTX.manager.spec.key == key and custom:
-        with CTX.manager.lock:
-            CTX.manager.unload()
+    if custom:
+        _unload_if_loaded(key)
     registry.remove_model(key)
     gr.Info(f"Removed {spec.name} from the list" if custom else f"Reset {spec.name} to its built-in defaults")
     new_key = "" if custom else key
-    return (models_df(), *model_editor_values(new_key), model_choice_update(), loaded_line(CTX.manager, CTX.upscaler.name))
+    return (models_df(), *model_editor_values(new_key), model_choice_update(), loaded_line(CTX.manager, CTX.upscaler.name, CTX.media))
 
 
 def delete_model_files(key, confirm, unlocked):
@@ -310,16 +338,14 @@ def delete_model_files(key, confirm, unlocked):
     guard(unlocked, confirm)
     spec = _find(key)
     mgr = CTX.manager
-    if mgr.spec and mgr.spec.key == key:
-        with mgr.lock:
-            mgr.unload()
+    _unload_if_loaded(key)
     removed = downloads.delete_model_files(spec)
     if spec.local or registry.is_custom(key) and Path(spec.source).suffix == ".safetensors":
         registry.remove_model(key)
     gr.Info(f"Deleted {len(removed)} item(s) for {spec.name}" if removed else f"Nothing on disk for {spec.name}")
     applog.log(f"admin: deleted files of {spec.key}: {removed}")
     still = any(m.key == key for m in models.all_models(include_disabled=True))
-    return (models_df(), *model_editor_values(key if still else ""), model_choice_update(), loaded_line(mgr, CTX.upscaler.name), False)
+    return (models_df(), *model_editor_values(key if still else ""), model_choice_update(), loaded_line(mgr, CTX.upscaler.name, CTX.media), False)
 
 
 # ----------------------------------------------------------------------------- loras tab
@@ -452,6 +478,10 @@ def check_source(text: str):
         steps, guidance, sched = 8, 1.0, ""
     elif family == "flux":
         steps, guidance, sched = 4, 0.0, ""
+    elif family == "video":
+        steps, guidance, sched = (30, 5.0, "") if "wan" in (info.get("pipeline") or "").lower() else (40, 3.0, "")
+    elif family == "music":
+        steps, guidance, sched = (100, 7.0, "") if "stableaudio" in (info.get("pipeline") or "").lower() else (0, 3.0, "")
     cands = info.get("candidates") or ([info["filename"]] if info.get("filename") else [])
     return (info, _info_html(info), gr.update(value=add_type), key, name, family,
             gr.update(choices=cands, value=cands[0] if cands else None, visible=len(cands) > 1),
@@ -468,14 +498,15 @@ def add_source(info, add_type, key, name, family, file_choice, trigger, steps, g
     if file_choice and kind == "hf_repo":
         info = dict(info, filename=file_choice)
     if add_type == "model":
-        if kind != "hf_repo" or info.get("layout") != "diffusers":
-            raise gr.Error("Only a Hugging Face repo in diffusers layout can be added as a model; files become checkpoints or LoRAs.")
+        if kind != "hf_repo" or info.get("layout") not in ("diffusers", "transformers"):
+            raise gr.Error("Only a Hugging Face repo in diffusers (or MusicGen) layout can be added as a model; files become checkpoints or LoRAs.")
         if any(m.key == key for m in models.all_models(include_disabled=True)):
             raise gr.Error(f"A model with key '{key}' exists already; choose another key.")
         registry.upsert_model(key, custom=True, name=name, source=info["repo"], family=family, steps=int(steps), guidance=float(guidance),
-                              scheduler=sched or "", variant=info.get("variant") or "", negative=family == "sdxl", description=desc.strip(),
+                              scheduler=sched or "", variant=info.get("variant") or "", negative=family in ("sdxl", "video"), description=desc.strip(),
                               download_gb=round((info.get("download_size") or info.get("total_size") or 0) / 1024**3, 1), enabled=True)
-        msg = f"Added model {name} (say 'model {key}')."
+        where = {"video": "Video tab", "music": "Music tab"}.get(family, f"say 'model {key}'")
+        msg = f"Added model {name} ({where})."
         if download_now:
             JOBS.submit("repo", name, downloads.download_repo(models.resolve(key)))
             msg += " Downloading in the background."
@@ -485,7 +516,7 @@ def add_source(info, add_type, key, name, family, file_choice, trigger, steps, g
                 model_choice_update(), lora_choice_update())
 
     if kind == "hf_repo" and info.get("layout") != "single-file":
-        raise gr.Error("That repo is a diffusers pipeline: add it as a Model instead.")
+        raise gr.Error("That repo is a full model: add it as a Model instead.")
     rename = key
     weight = float(weight)
 
@@ -741,8 +772,8 @@ def logs_text(n, contains, level):
 
 # ----------------------------------------------------------------------------- build
 
-def build_admin(manager, upscaler, static_gpu, prompt_box, tabs, model_choice, lora_choice, loaded_md):
-    CTX.manager, CTX.upscaler, CTX.static_gpu = manager, upscaler, static_gpu
+def build_admin(manager, upscaler, static_gpu, prompt_box, tabs, model_choice, lora_choice, loaded_md, media_mgr=None):
+    CTX.manager, CTX.media, CTX.upscaler, CTX.static_gpu = manager, media_mgr, upscaler, static_gpu
     unlocked = gr.State(not admin_password())
     CTX.unlocked = unlocked
     stats_kw = dict(concurrency_id="stats", concurrency_limit=3)
@@ -769,7 +800,8 @@ def build_admin(manager, upscaler, static_gpu, prompt_box, tabs, model_choice, l
         # ---------------------------------------------------------------- models
         with gr.Tab("Models") as t_models:
             gr.Markdown("Click a model to edit its defaults. Changes are saved to `models/registry.json` and apply to the next load. "
-                        "Add new models in the **Add** tab.")
+                        "Add new models in the **Add** tab. Image, **video** and **music** models all live here; the family decides "
+                        "which tab uses them.")
             m_table = gr.Dataframe(value=models_df, headers=MODEL_COLUMNS, interactive=False, wrap=True, max_height=360)
             m_status = gr.HTML(model_status_html(""))
             with gr.Row():
@@ -822,7 +854,7 @@ def build_admin(manager, upscaler, static_gpu, prompt_box, tabs, model_choice, l
                     with gr.Row():
                         le_stem = gr.Textbox(label="File (tag: <lora:file:weight>)", interactive=False)
                         le_name = gr.Textbox(label="Display name")
-                        le_family = gr.Dropdown(FAMILY_CHOICES, value="sdxl", label="Trained for")
+                        le_family = gr.Dropdown(LORA_FAMILY_CHOICES, value="sdxl", label="Trained for")
                     with gr.Row():
                         le_trigger = gr.Textbox(label="Trigger words (put them in the prompt)", scale=2)
                         le_weight = gr.Slider(-1.0, 2.0, value=0.8, step=0.05, label="Default weight", scale=1)
@@ -847,9 +879,10 @@ def build_admin(manager, upscaler, static_gpu, prompt_box, tabs, model_choice, l
         # ---------------------------------------------------------------- add
         with gr.Tab("Add") as t_add:
             gr.Markdown(
-                "Paste a **Hugging Face repo** (`RunDiffusion/Juggernaut-XL-v9`), a **file in a repo** "
-                "(`nerijs/pixel-art-xl/pixel-art-xl.safetensors`), a **Civitai link**, a **direct URL** to a `.safetensors` file "
-                "or a **local path**, then press *Check*. Downloads run in the background; models become available as soon as they finish."
+                "Paste a **Hugging Face repo** (`RunDiffusion/Juggernaut-XL-v9`, `Lightricks/LTX-Video`, `facebook/musicgen-stereo-medium`), "
+                "a **file in a repo** (`nerijs/pixel-art-xl/pixel-art-xl.safetensors`), a **Civitai link**, a **direct URL** to a `.safetensors` file "
+                "or a **local path**, then press *Check*. Video and music repos are recognised from their pipeline class. "
+                "Downloads run in the background; models become available as soon as they finish."
             )
             with gr.Row():
                 a_source = gr.Textbox(label="Source", placeholder="owner/repo · owner/repo/file.safetensors · https://civitai.com/models/… · D:\\models\\file.safetensors", scale=5)

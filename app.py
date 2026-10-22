@@ -22,7 +22,9 @@ See prompt_parser.py for the full list of understood words and models.py for the
 
 Tabs:
     Studio     prompt, quick chips, model and LoRA boxes, results, upscale bar (2K/4K/8K with Real-ESRGAN)
-    History    every generation from generations.db: filters, thumbnails, reuse prompt/seed, delete
+    Video      text/image-to-video with LTX-Video or Wan 2.1, frame-wise upscale to Full HD/2K/4K, soundtrack (media_ui.py)
+    Music      text-to-music with MusicGen (media_ui.py)
+    History    every generation (images, videos, tracks) from generations.db: filters, thumbnails, reuse, delete
     Admin      models and LoRAs management, downloads, system stats, settings, logs (admin_ui.py)
 """
 
@@ -48,9 +50,13 @@ from PIL import Image
 import admin_ui
 import db
 import gpu_info
+import media
+import media_ui
 import models
 import registry
+import video_io
 from downloads import JOBS
+from media import MediaManager
 from models import ModelManager, ModelSpec
 from prompt_parser import Settings, parse
 from ui_common import (header_html, loaded_line, lora_choice_update, lora_choices, model_cards_html, model_choice_update,
@@ -62,7 +68,8 @@ OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 UPSCALE_CHOICES = [("2K (2560 px)", "2k"), ("4K (3840 px)", "4k"), ("8K (7680 px)", "8k")]
-HISTORY_COLUMNS = ["id", "when", "prompt", "model", "size", "steps", "seconds", "it/s", "peak VRAM GB", "temp C", "seed"]
+HISTORY_COLUMNS = ["id", "kind", "when", "prompt", "model", "size / length", "steps", "seconds", "it/s", "peak VRAM GB", "temp C", "seed"]
+KIND_CHOICES = [("Everything", ""), ("Images", "image"), ("Videos", "video"), ("Music", "music")]
 
 HELP = """
 **Write everything in the prompt.** The app reads these hints:
@@ -93,15 +100,22 @@ then press <b>Generate</b> or Enter.<br>The chips above the prompt add the commo
 # ----------------------------------------------------------------------------- start-up
 
 MANAGER = ModelManager()
+MEDIA = MediaManager(MANAGER.lock)       # video and music models; shares the GPU lock with the image manager
 STARTUP_MODEL = os.environ.get("FRAZILE_STARTUP_MODEL") or registry.setting("startup_model") or "zimage"
 if STARTUP_MODEL != "none":
     try:
-        MANAGER.load(STARTUP_MODEL)
+        _startup_spec = models.resolve(STARTUP_MODEL)
+        if models.kind_of(_startup_spec.family) == "image":
+            MANAGER.load(_startup_spec)
+        else:
+            MEDIA.load(_startup_spec)
     except Exception as e:  # a missing download or a bad registry entry must not stop the app
         print(f"Could not load the start-up model '{STARTUP_MODEL}': {e}")
 UPSCALER = Upscaler()
 print(f"Upscaler ready: {UPSCALER.name}")
 STATIC_GPU = gpu_info.static_info()
+media_ui.CTX.manager, media_ui.CTX.media, media_ui.CTX.upscaler, media_ui.CTX.static_gpu, media_ui.CTX.output_dir = (
+    MANAGER, MEDIA, UPSCALER, STATIC_GPU, OUTPUT_DIR)
 
 
 def ui_lora_weight(stem: str) -> float:
@@ -115,16 +129,26 @@ def default_negative() -> str:
 
 # ----------------------------------------------------------------------------- model selection
 
+def _image_only(spec: ModelSpec) -> ModelSpec:
+    kind = models.kind_of(spec.family)
+    if kind != "image":
+        raise gr.Error(f"{spec.name} makes {kind}: use the {kind.capitalize()} tab for it.")
+    return spec
+
+
 def pick_model(s: Settings, choice: str) -> tuple[ModelSpec, str | None]:
     """Which model to use for this prompt, and an optional note explaining an automatic choice."""
     if s.model:
         try:
-            return models.resolve(s.model), None
+            return _image_only(models.resolve(s.model)), None
         except KeyError:
-            raise gr.Error(f"Unknown model '{s.model}'. Available: {', '.join(m.key for m in models.all_models())}")
+            raise gr.Error(f"Unknown model '{s.model}'. Available: {', '.join(m.key for m in models.all_models(kind='image'))}")
     if choice and choice != "auto":
-        return models.resolve(choice), None
-    current = MANAGER.spec or (models.resolve(STARTUP_MODEL) if STARTUP_MODEL != "none" else models.all_models()[0])
+        return _image_only(models.resolve(choice)), None
+    fallback = models.resolve(STARTUP_MODEL) if STARTUP_MODEL != "none" else None
+    if fallback is None or models.kind_of(fallback.family) != "image":
+        fallback = models.all_models(kind="image")[0]
+    current = MANAGER.spec or fallback
     if s.loras:
         # Switch to a model of the family the LoRAs were trained for, so they take effect.
         families = sorted({models.lora_info(n).get("family") or "sdxl" for n, _ in s.loras})
@@ -273,6 +297,7 @@ def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] 
     with MANAGER.lock:
         if MANAGER.spec is None or MANAGER.spec.key != spec.key:
             progress(0, desc=f"Loading {spec.name}" + ("" if models.is_downloaded(spec) else f" (downloading ~{spec.download_gb:g} GB)"))
+        s.notes.extend(media.prepare_for(spec, MANAGER, MEDIA))   # a loaded video model gives the card back first
         try:
             pipe = MANAGER.load(spec)
         except RuntimeError as e:
@@ -372,7 +397,7 @@ def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] 
         None,
         gr.update(visible=True),
         upscale_hint(records, None),
-        loaded_line(MANAGER, UPSCALER.name),
+        loaded_line(MANAGER, UPSCALER.name, MEDIA),
         gr.update(visible=False),
     )
 
@@ -468,16 +493,27 @@ def history_model_choices():
     return [("All models", "")] + [(models.display_name(m), m) for m in db.models_used()]
 
 
-def history_rows(search: str = "", limit: int = 50, model_id: str = "", upscaled_only: bool = False) -> list[dict]:
-    return db.fetch_filtered(limit=int(limit or 50), search=search or "", model_id=model_id or None, upscaled_only=bool(upscaled_only))
+def history_rows(search: str = "", limit: int = 50, model_id: str = "", upscaled_only: bool = False, kind: str = "") -> list[dict]:
+    return db.fetch_filtered(limit=int(limit or 50), search=search or "", model_id=model_id or None, upscaled_only=bool(upscaled_only),
+                             kind=kind or None)
+
+
+def _size_text(r: dict) -> str:
+    kind = r.get("kind") or "image"
+    if kind == "music":
+        return f"{r.get('duration_s') or 0:.0f} s · {(r.get('sample_rate') or 0) // 1000} kHz"
+    base = f"{r['width']}x{r['height']}"
+    if kind == "video":
+        base += f" · {r.get('duration_s') or 0:.1f} s"
+    if r.get("upscaled_width"):
+        base += f" → {r['upscaled_width']}x{r['upscaled_height']}"
+    return base
 
 
 def history_table(rows: list[dict]) -> pd.DataFrame:
     data = [
-        [r["id"], r["created_at"][:16].replace("T", " "), r["user_prompt"][:70],
-         models.display_name(r.get("model_id") or ""),
-         (f"{r['width']}x{r['height']} → {r['upscaled_width']}x{r['upscaled_height']}"
-          if r.get("upscaled_width") else f"{r['width']}x{r['height']}"),
+        [r["id"], r.get("kind") or "image", r["created_at"][:16].replace("T", " "), r["user_prompt"][:70],
+         models.display_name(r.get("model_id") or ""), _size_text(r),
          r["steps"], r["inference_seconds"], r["steps_per_second"],
          r["vram_peak_gb"], r["temp_after_c"], r["seed"]]
         for r in rows
@@ -496,24 +532,31 @@ def thumbnail_for(path: str) -> str | None:
     if not src.exists():
         return None
     THUMB_DIR.mkdir(exist_ok=True)
-    thumb = THUMB_DIR / f"{src.stem}.jpg"
+    ext = src.suffix.lower()
+    thumb = THUMB_DIR / (f"{src.stem}.png" if ext == ".wav" else f"{src.stem}.jpg")
     if not thumb.exists() or thumb.stat().st_mtime < src.stat().st_mtime:
         try:
-            with Image.open(src) as im:
-                im = im.convert("RGB")
-                im.thumbnail((THUMB_SIZE, THUMB_SIZE))
-                im.save(thumb, "JPEG", quality=82)
-        except OSError:
-            return str(src)
+            if ext == ".mp4":
+                video_io.video_thumbnail(src, thumb, THUMB_SIZE)       # first frame
+            elif ext == ".wav":
+                video_io.waveform_png(src, thumb)                     # waveform picture
+            else:
+                with Image.open(src) as im:
+                    im = im.convert("RGB")
+                    im.thumbnail((THUMB_SIZE, THUMB_SIZE))
+                    im.save(thumb, "JPEG", quality=82)
+        except (OSError, RuntimeError):
+            return str(src) if ext not in (".mp4", ".wav") else None
     return str(thumb)
 
 
 def history_gallery(rows: list[dict]) -> list[tuple[str, str]]:
     out = []
+    icons = {"video": "▶ ", "music": "♪ "}
     for r in rows[:60]:
         t = thumbnail_for(r["image_path"])
         if t:
-            out.append((t, f"#{r['id']} · {r['user_prompt'][:60]}"))
+            out.append((t, f"#{r['id']} {icons.get(r.get('kind') or 'image', '')}· {r['user_prompt'][:60]}"))
     return out
 
 
@@ -522,8 +565,10 @@ def history_stats() -> str:
     rc = db.recent_counts()
     if not st["images"]:
         return "No generations recorded yet."
+    k = db.counts_by_kind()
     return (
-        f"**{st['images']} images** ({rc['today']} today, {rc['week']} this week)  ·  {st['total_seconds']} s of GPU time  ·  "
+        f"**{st['images']} generations** ({k['image']['count']} images, {k['video']['count']} videos, {k['music']['count']} tracks; "
+        f"{rc['today']} today, {rc['week']} this week)  ·  {st['total_seconds']} s of GPU time  ·  "
         f"avg {st['avg_inference_seconds']} s (fastest {st['fastest_seconds']} s, slowest {st['slowest_seconds']} s)  ·  "
         f"avg {st['avg_steps_per_second']} steps/s  ·  avg peak VRAM {st['avg_vram_peak_gb']} GB "
         f"(max {st['max_vram_peak_gb']} GB)  ·  hottest {st['max_temp_c']} °C  ·  peak power {st['max_power_w']} W  ·  "
@@ -531,26 +576,36 @@ def history_stats() -> str:
     )
 
 
-def refresh_history(search: str, limit: int, model_id: str, upscaled_only: bool):
-    rows = history_rows(search, limit, model_id, upscaled_only)
+def refresh_history(search: str, limit: int, model_id: str, upscaled_only: bool, kind: str = ""):
+    rows = history_rows(search, limit, model_id, upscaled_only, kind)
     return (history_table(rows), history_gallery(rows), history_stats(),
             gr.update(choices=history_model_choices(), value=model_id if model_id in db.models_used() else ""))
 
 
+_NO_PREVIEW = (gr.update(value=None, visible=True), gr.update(value=None, visible=False), gr.update(value=None, visible=False))
+
+
 def show_record(row_id: int | None):
+    """(image, video, audio, details, id): the player matching the record's kind is shown, the others hidden."""
     if not row_id:
-        return None, "", None
+        return (*_NO_PREVIEW, "", None)
     rec = db.get(int(row_id))
     if not rec:
-        return None, f"Generation #{row_id} not found.", None
-    shown = rec.get("upscaled_path") or rec["image_path"]
-    img = shown if Path(shown).exists() else None
-    return img, details_markdown(rec), int(row_id)
+        return (*_NO_PREVIEW, f"Generation #{row_id} not found.", None)
+    kind = rec.get("kind") or "image"
+    shown = rec.get("soundtrack_path") if kind == "video" and rec.get("soundtrack_path") else None
+    shown = shown or rec.get("upscaled_path") or rec["image_path"]
+    shown = shown if Path(shown).exists() else None
+    img = gr.update(value=shown if kind == "image" else None, visible=kind == "image")
+    vid = gr.update(value=shown if kind == "video" else None, visible=kind == "video")
+    aud = gr.update(value=shown if kind == "music" else None, visible=kind == "music")
+    details = details_markdown(rec) if kind == "image" else media_ui.media_details_markdown(rec)
+    return img, vid, aud, details, int(row_id)
 
 
 def select_history(evt: gr.SelectData, table: pd.DataFrame):
     if table is None or len(table) == 0:
-        return None, "", None
+        return show_record(None)
     return show_record(int(table.iloc[evt.index[0]]["id"]))
 
 
@@ -561,35 +616,40 @@ def select_history_thumb(evt: gr.SelectData):
 
 
 def reuse_prompt(row_id: int | None, with_seed: bool):
+    """Put the prompt back into the tab that made it (Studio, Video or Music) and switch there."""
     if not row_id:
         raise gr.Error("Select a generation first.")
     rec = db.get(int(row_id))
     if not rec:
         raise gr.Error("That generation no longer exists.")
-    prompt = rec["user_prompt"]
-    if with_seed:
-        prompt = f"{drop_seed(prompt)}, seed {rec['seed']}"
-    else:
-        prompt = drop_seed(prompt)
-    return prompt, gr.Tabs(selected="studio")
+    kind = rec.get("kind") or "image"
+    prompt = drop_seed(rec["user_prompt"])
+    if with_seed and kind == "image":
+        prompt = f"{prompt}, seed {rec['seed']}"
+    if with_seed and kind != "image":
+        gr.Info(f"Seed {rec['seed']}: enter it in the Seed box of the {kind.capitalize()} tab")
+    tab = {"image": "studio", "video": "video", "music": "music"}[kind]
+    keep = gr.update()
+    return (prompt if kind == "image" else keep, prompt if kind == "video" else keep, prompt if kind == "music" else keep,
+            gr.Tabs(selected=tab))
 
 
-def delete_history(row_id: int | None, remove_files: bool, search: str, limit: int, model_id: str, upscaled_only: bool):
+def delete_history(row_id: int | None, remove_files: bool, search: str, limit: int, model_id: str, upscaled_only: bool, kind: str = ""):
     if not row_id:
         raise gr.Error("Select a generation first.")
     removed = db.delete(int(row_id), remove_files=remove_files)
     gr.Info(f"Deleted generation #{row_id}" + (f" and {len(removed)} file(s)" if removed else ""))
-    rows = history_rows(search, limit, model_id, upscaled_only)
-    return history_table(rows), history_gallery(rows), history_stats(), None, "", None
+    rows = history_rows(search, limit, model_id, upscaled_only, kind)
+    return history_table(rows), history_gallery(rows), history_stats(), *_NO_PREVIEW, "", None
 
 
 # ----------------------------------------------------------------------------- ui
 
 def refresh_header():
-    return header_html(STATIC_GPU, MANAGER, len(JOBS.active()))
+    return header_html(STATIC_GPU, MANAGER, len(JOBS.active()), MEDIA)
 
 
-with gr.Blocks(title="Frazile AI · Image Studio", fill_width=True) as demo:
+with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_width=True) as demo:
     header = gr.HTML(refresh_header())
 
     with gr.Tabs() as tabs:
@@ -614,7 +674,7 @@ with gr.Blocks(title="Frazile AI · Image Studio", fill_width=True) as demo:
                         model_choices(), value="auto", label="Model", allow_custom_value=True,
                         info="Or name it in the prompt: 'model juggernaut'. Switching takes ~25 s (longer for Z-Image and Qwen); the first use of a model downloads it.",
                     )
-                    loaded_md = gr.Markdown(loaded_line(MANAGER, UPSCALER.name), elem_classes=["fz-loaded"])
+                    loaded_md = gr.Markdown(loaded_line(MANAGER, UPSCALER.name, MEDIA), elem_classes=["fz-loaded"])
                     lora_choice = gr.Dropdown(
                         lora_choices(), multiselect=True, label="LoRAs", allow_custom_value=True,
                         info="Each LoRA applies at its own default weight (Admin › LoRAs); write <lora:name:1.2> in the prompt for another. "
@@ -680,15 +740,25 @@ with gr.Blocks(title="Frazile AI · Image Studio", fill_width=True) as demo:
                 inputs=[prompt],
             )
 
+        with gr.Tab("Video", id="video") as video_tab:
+            video_ui = media_ui.build_video_tab(loaded_md)
+            video_tab.select(media_ui.refresh_video_choices, [video_ui.model, video_ui.track], [video_ui.model, video_ui.track],
+                             show_progress="hidden")
+
+        with gr.Tab("Music", id="music") as music_tab:
+            music_ui = media_ui.build_music_tab(loaded_md)
+            music_tab.select(media_ui.refresh_music_choices, [music_ui.model], [music_ui.model], show_progress="hidden")
+
         with gr.Tab("History", id="history") as history_tab:
             stats_md = gr.Markdown(history_stats())
             with gr.Row():
                 search = gr.Textbox(label="Search prompts", placeholder="cabin", scale=3)
+                h_kind = gr.Dropdown(KIND_CHOICES, value="", label="Kind", scale=1)
                 h_model = gr.Dropdown(history_model_choices(), value="", label="Model", scale=2)
                 h_upscaled = gr.Checkbox(label="Upscaled only", value=False, scale=1)
                 limit = gr.Number(label="Show last", value=50, precision=0, scale=1)
                 refresh = gr.Button("Refresh", scale=1)
-            h_filters = [search, limit, h_model, h_upscaled]
+            h_filters = [search, limit, h_model, h_upscaled, h_kind]
             with gr.Tabs():
                 with gr.Tab("Table"):
                     table = gr.Dataframe(
@@ -697,34 +767,39 @@ with gr.Blocks(title="Frazile AI · Image Studio", fill_width=True) as demo:
                     )
                 with gr.Tab("Thumbnails"):
                     thumbs = gr.Gallery(value=history_gallery(history_rows()), columns=6, height=420, object_fit="cover",
-                                        preview=False, label="Click an image to see its details")
+                                        preview=False, label="Click a thumbnail to see its details (▶ video, ♪ music)")
             with gr.Row():
                 with gr.Column(scale=1):
                     hist_image = gr.Image(label="Image", type="filepath", height=520)
+                    hist_video = gr.Video(label="Video", height=520, visible=False)
+                    hist_audio = gr.Audio(label="Track", type="filepath", visible=False)
                     with gr.Row():
                         h_reuse = gr.Button("Reuse prompt", variant="primary")
                         h_reuse_seed = gr.Button("Reuse prompt + seed")
                     with gr.Row():
-                        h_del_files = gr.Checkbox(label="Also delete the image files", value=False)
+                        h_del_files = gr.Checkbox(label="Also delete the files", value=False)
                         h_delete = gr.Button("Delete this generation", variant="stop")
                 with gr.Column(scale=1):
                     hist_details = gr.Markdown("")
             h_selected = gr.State(None)
 
             h_outputs = [table, thumbs, stats_md, h_model]
+            h_preview = [hist_image, hist_video, hist_audio, hist_details, h_selected]
             history_tab.select(refresh_history, h_filters, h_outputs)
             refresh.click(refresh_history, h_filters, h_outputs)
             search.submit(refresh_history, h_filters, h_outputs)
             h_model.input(refresh_history, h_filters, h_outputs)
             h_upscaled.input(refresh_history, h_filters, h_outputs)
-            table.select(select_history, [table], [hist_image, hist_details, h_selected])
-            thumbs.select(select_history_thumb, None, [hist_image, hist_details, h_selected])
-            h_reuse.click(lambda i: reuse_prompt(i, False), [h_selected], [prompt, tabs])
-            h_reuse_seed.click(lambda i: reuse_prompt(i, True), [h_selected], [prompt, tabs])
-            h_delete.click(delete_history, [h_selected, h_del_files, *h_filters], [table, thumbs, stats_md, hist_image, hist_details, h_selected])
+            h_kind.input(refresh_history, h_filters, h_outputs)
+            table.select(select_history, [table], h_preview)
+            thumbs.select(select_history_thumb, None, h_preview)
+            reuse_targets = [prompt, video_ui.prompt, music_ui.prompt, tabs]
+            h_reuse.click(lambda i: reuse_prompt(i, False), [h_selected], reuse_targets)
+            h_reuse_seed.click(lambda i: reuse_prompt(i, True), [h_selected], reuse_targets)
+            h_delete.click(delete_history, [h_selected, h_del_files, *h_filters], [table, thumbs, stats_md, *h_preview])
 
         with gr.Tab("Admin", id="admin"):
-            admin = admin_ui.build_admin(MANAGER, UPSCALER, STATIC_GPU, prompt, tabs, model_choice, lora_choice, loaded_md)
+            admin = admin_ui.build_admin(MANAGER, UPSCALER, STATIC_GPU, prompt, tabs, model_choice, lora_choice, loaded_md, media_mgr=MEDIA)
 
     header_timer = gr.Timer(5, active=True)
     header_timer.tick(refresh_header, None, header, show_progress="hidden", concurrency_id="stats", concurrency_limit=3)

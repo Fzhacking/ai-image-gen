@@ -26,7 +26,8 @@ GRADIENT_HOVER = "linear-gradient(90deg, #F472B6 0%, #FBBF24 55%, #FDE047 100%)"
 STATUS = {"good": ("#0ca30c", "●", "OK"), "warning": ("#fab219", "▲", "Warm"),
           "serious": ("#ec835a", "▲", "Hot"), "critical": ("#d03b3b", "■", "Critical"),
           "info": ("#3b82f6", "●", "Info"), "neutral": (MUTED, "○", "n/a")}
-FAMILY_COLORS = {"sdxl": "#EC4899", "zimage": "#FACC15", "qwen": "#38BDF8", "flux": "#A78BFA"}
+FAMILY_COLORS = {"sdxl": "#EC4899", "zimage": "#FACC15", "qwen": "#38BDF8", "flux": "#A78BFA",
+                 "video": "#34D399", "music": "#FB923C"}
 
 
 def build_theme() -> gr.themes.Base:

@@ -1,9 +1,10 @@
 # Frazile AI - AI Image Generation (local GPU)
 
 Runs Z-Image Turbo, Stable Diffusion XL and its best community fine-tunes, Qwen-Image and FLUX.1 on your
-NVIDIA GPU using Hugging Face `diffusers`, with prompt weighting, LoRAs and Real-ESRGAN upscaling. A web
-Studio drives everything from the prompt; an Admin panel manages models, LoRAs, downloads and shows live
-system statistics.
+NVIDIA GPU using Hugging Face `diffusers`, with prompt weighting, LoRAs and Real-ESRGAN upscaling. Since
+version 2.2 it also makes **video** (LTX-Video, Wan 2.1, with frame-by-frame upscaling to 4K) and **music**
+(MusicGen) from the same app. A web Studio drives everything from the prompt; an Admin panel manages
+models, LoRAs, downloads and shows live system statistics.
 
 **Project owner:** Frazile AI  
 **Author:** Frazile AI
@@ -45,6 +46,17 @@ Images are saved to `outputs\`. The first use of a model downloads it (~7 GB eac
 | `model animagine` | Animagine XL 3.1 | 28 | 6 | anime and manga |
 | `model qwen` | Qwen-Image + Lightning | 8 | 1 | 20B model in 4-bit: best text rendering and layout, posters, signage |
 | `model flux` | FLUX.1 [schnell] | 4 | 0 | best prompt understanding: text, counting, complex scenes |
+
+Video and music models live in the same registry but are used from their own tabs (see
+[Video and music](#video-and-music)):
+
+| Model | Family | Defaults | What it does |
+|---|---|---|---|
+| LTX-Video 2B (`ltx`) | video | 40 steps, guidance 3, 24 fps | text-to-video and image-to-video; 768x512 clips of 2-10 s in about a minute; ~28 GB |
+| Wan 2.1 T2V 1.3B (`wan`) | video | 30 steps, guidance 5, 16 fps | text-to-video at 832x480 with smoother motion; several minutes per clip; ~29 GB |
+| MusicGen stereo medium (`musicgen`) | music | guidance 3 | instrumental music, 32 kHz stereo, up to 30 s; ~4 GB |
+| MusicGen stereo small (`musicgen-small`) | music | guidance 3 | quick sketches; ~1.3 GB |
+| Stable Audio Open 1.0 (`stable-audio`) | music | 100 steps, guidance 7 | 44.1 kHz music loops and sound effects, up to 47 s; gated on Hugging Face, untested here |
 
 Steps and CFG are the model's defaults; `quick`, `highly detailed`, `strict`, `creative`,
 `30 steps` and `cfg 8` still adjust them. Every SDXL-family model runs with the DPM++ 2M Karras
@@ -133,16 +145,61 @@ Example: `a cozy cabin in a snowy forest at dusk, cinematic, 16:9, 4k, seed 42`
 A line under the prompt box shows how the prompt was interpreted before you generate.
 Every result is also saved to `outputs\`.
 
+## Video and music
+
+The **Video** and **Music** tabs use the same GPU, the same History and the same Admin panel as the
+images. Both work entirely offline once the weights are downloaded (first use, or **Admin › Models ›
+Download in background**).
+
+**Video tab.** Describe the scene, the motion and the camera in a sentence or two, pick a video
+model, a size (768x512, 512x768, 832x480, 480x832, 1024x576, 576x1024), a length (2-10 s), steps,
+guidance and a seed, then press **Generate video**. Chips above the prompt add camera and motion
+hints. Options:
+
+- **Start image** (LTX-Video only): drop in any picture, or a Studio result, and the model animates it
+  (image-to-video). The image is centre-cropped to the chosen size.
+- **Upscale video**: every frame is run through Real-ESRGAN's compact video network
+  (`realesr-general-x4v3`, fetched on first use into `models\`), resampled to the exact target and
+  re-encoded to H.264. A 4 s LTX clip reaches 3840x2560 in about a minute on an RTX 3090.
+- **Add soundtrack**: pick any track made in the Music tab; it is cut to the clip length with a short
+  fade-out and muxed into a new MP4.
+
+Video models need the whole 24 GB card, so the image model is unloaded while a video model is in use
+and reloads automatically on the next image. Clips are H.264 MP4 files in `outputs\`
+(`<timestamp>_seed<seed>.mp4`, `_up3840.mp4` for upscales, `_music.mp4` with a soundtrack).
+
+**Music tab.** Describe genre, mood, instruments and tempo ("upbeat synthwave with punchy drums and
+a warm bass line, 120 bpm"), choose a length (3-30 s with MusicGen), guidance, temperature and a
+seed, then press **Generate music**. MusicGen writes instrumental stereo music at 32 kHz; a 15 s
+track takes roughly 30-60 s. Tracks are 16-bit WAV files in `outputs\`. A small MusicGen model
+(about 4 GB of VRAM) can stay loaded next to an SDXL model; the big image models get the card to
+themselves.
+
+Measured on the RTX 3090 (see `docs\10-Video-and-Music.pdf` for the full table):
+
+| Operation | Settings | Time | VRAM |
+|---|---|---|---|
+| LTX-Video text-to-video | 768x512, 89 frames (3.7 s), 30 steps | 30 s | 15.5 GB peak |
+| LTX-Video image-to-video | 768x512, 65 frames, 20 steps, from a Studio PNG | 16 s | 14.9 GB peak |
+| LTX-Video load | first load 186 s (writes a bf16 text-encoder copy), then 94 s | | 14.2 GB resident |
+| Wan 2.1 text-to-video | 832x480, 49 frames (3 s), 30 steps | 205 s | 12.9 GB peak |
+| Wan 2.1 load | first load 266 s, then 164 s (8-bit text encoder) | | 11.1 GB resident |
+| Video upscale to 4K | 65 frames to 3840x2560 | 49 s | under 1 GB extra |
+| MusicGen stereo medium | 10 s track, guidance 3 | 36 s (+24 s load) | 4.2 GB peak |
+
+Everything lands in **History** with a `kind` column (image, video, music), a first-frame or waveform
+thumbnail, an inline player and **Reuse prompt**, which sends the prompt back to the tab that made it.
+
 ## Admin panel
 
 The **Admin** tab manages the studio and watches the machine. Its sub-tabs:
 
-- **Overview:** the system tiles (below), activity tiles (images today and this week, GPU minutes in the
-  last 24 h, loaded and start-up model, models on disk, LoRAs, downloads, outputs size, Hugging Face
-  login) and a per-model table of images, average / fastest / slowest seconds, steps per second, VRAM and
-  temperature.
-- **Models:** every model with family, type (built-in, local file, added), defaults, sampler, on-disk size,
-  usage and enabled / start-up flags. Click one to edit it, **Load now**, **Download in background**,
+- **Overview:** the system tiles (below), activity tiles (generations today and this week, images /
+  videos / tracks with total seconds of video and music, GPU minutes in the last 24 h, loaded and
+  start-up model, models on disk by kind, LoRAs, downloads, outputs size, Hugging Face login) and a
+  per-model table of uses, average / fastest / slowest seconds, steps per second, VRAM and temperature.
+- **Models:** every model (image, video and music) with family, type (built-in, local file, added), defaults,
+  sampler, on-disk size, usage and enabled / start-up flags. Click one to edit it, **Load now**, **Download in background**,
   **Set as start-up model**, unload the current model to free VRAM, remove it from the list (or reset a
   built-in to its defaults) or delete its files from disk.
 - **LoRAs:** every LoRA file with family, trigger words, default weight, size and recorded uses; edit the
@@ -211,11 +268,12 @@ After every run the Generate tab shows a report under the gallery: inference tim
 steps per second, image settings, peak VRAM, GPU temperature and power before and after,
 clock speeds, fan, driver and library versions, and the exact prompt sent to the model.
 
-Every image is also recorded in `generations.db` (SQLite). Browse it two ways:
+Every image, video clip and music track is also recorded in `generations.db` (SQLite). Browse it two ways:
 
-- **History tab** in the app: search prompts, filter by model or upscaled-only, browse a table or a
-  thumbnail grid, click an entry to view the image with its full details, **Reuse prompt** (with or
-  without the seed) to send it back to the Studio, or delete the record and its files.
+- **History tab** in the app: search prompts, filter by kind (images, videos, music), model or
+  upscaled-only, browse a table or a thumbnail grid, click an entry to view or play it with its full
+  details, **Reuse prompt** (with or without the seed) to send it back to the tab that made it, or
+  delete the record and its files.
 - **Command line:**
 
 ```powershell
@@ -250,8 +308,8 @@ Upscale any existing image from the command line:
 Full technical documentation is in `docs\` as PDFs:
 
 - `00-AI-Image-Generator-Complete-Technical-Documentation.pdf` is the complete document.
-- `01-Project-Overview.pdf` to `14-Appendix.pdf` are the same sections as standalone PDFs
+- `01-Project-Overview.pdf` to `15-Appendix.pdf` are the same sections as standalone PDFs
   (requirements, architecture, workflows, module reference, models, prompt language, database schema,
-  admin panel, performance, deployment, operations, change log, appendix).
+  admin panel, video and music, performance, deployment, operations, change log, appendix).
 
 Rebuild them after a change with `.\.venv\Scripts\python.exe docs-src\build_pdf.py`.
