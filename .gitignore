@@ -12,6 +12,7 @@ models/loras/*.safetensors
 
 # Generated images and local database
 outputs/
+outputs/.thumbs/
 generations.db
 
 # OS / editor
@@ -20,3 +21,7 @@ Thumbs.db
 
 # Local bf16 copies of converted models (rebuilt automatically)
 models/cache/
+
+# Admin panel registry (models, LoRAs, settings) is local data
+models/registry.json
+models/registry.json.tmp

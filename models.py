@@ -19,7 +19,11 @@ Built-in models (Hugging Face repos, downloaded on first use into the HF cache):
 
 Local models:
     models/checkpoints/*.safetensors    any SDXL single-file checkpoint (Civitai style)
-    models/loras/*.safetensors          SDXL LoRAs, used with <lora:name:0.8> in the prompt
+    models/loras/*.safetensors          LoRAs, used with <lora:name:0.8> in the prompt
+
+Admin-managed models (models/registry.json, see registry.py): custom Hugging Face repos or
+downloaded checkpoints added from the Admin panel, overrides of the built-in defaults, LoRA
+metadata (family, trigger words, default weight) and the start-up model.
 
 Prompt weighting (SDXL family, via compel):
     (word)1.3  (word)++  (word)--   or Automatic1111 style  (word:1.3)
@@ -150,8 +154,23 @@ def local_checkpoints() -> list[ModelSpec]:
     return specs
 
 
-def all_models() -> list[ModelSpec]:
-    return BUILTIN + local_checkpoints()
+def all_models(include_disabled: bool = False) -> list[ModelSpec]:
+    """Built-in models (with admin overrides), local checkpoints and admin-added models."""
+    import registry
+    specs = [registry.apply_overrides(m) for m in BUILTIN + local_checkpoints()]
+    seen = {m.key for m in specs}
+    specs += [m for m in registry.custom_models() if m.key not in seen]
+    if include_disabled:
+        return specs
+    return [m for m in specs if registry.is_enabled(m.key)]
+
+
+def family_models(family: str, on_disk_only: bool = True) -> list[ModelSpec]:
+    """Models of one family, preferred ones first (used when a LoRA needs a different family)."""
+    import registry
+    order = {k: i for i, k in enumerate(registry.FAMILY_PREFERRED.get(family, ()))}
+    specs = [m for m in all_models() if m.family == family and (not on_disk_only or is_downloaded(m))]
+    return sorted(specs, key=lambda m: (order.get(m.key, 99), m.name.lower()))
 
 
 def model_words() -> list[str]:
@@ -170,7 +189,7 @@ def resolve(name: str | ModelSpec | None) -> ModelSpec:
     if not name:
         return BUILTIN[0]
     needle = name.strip().lower()
-    for m in all_models():
+    for m in all_models(include_disabled=True):
         if needle in (m.key, m.name.lower(), m.source.lower(), *m.aliases) or needle == _slug(m.name):
             return m
     p = Path(name)
@@ -188,45 +207,93 @@ def local_checkpoints_from(path: Path) -> ModelSpec:
 
 
 def display_name(source: str) -> str:
-    for m in all_models():
+    for m in all_models(include_disabled=True):
         if m.source == source:
             return m.name
     return Path(source).name
+
+
+def spec_for_source(source: str) -> ModelSpec | None:
+    for m in all_models(include_disabled=True):
+        if m.source == source:
+            return m
+    return None
 
 
 def model_for_style(style: str | None) -> ModelSpec | None:
     """The built-in model that specialises in a prompt_parser style, if any."""
     if not style:
         return None
-    for m in BUILTIN:
+    for m in all_models():
         if style in m.styles:
             return m
     return None
+
+
+def hf_cache_dir(repo_id: str) -> Path:
+    """Folder of one repo inside the Hugging Face cache (may not exist yet)."""
+    from huggingface_hub.constants import HF_HUB_CACHE
+    return Path(HF_HUB_CACHE) / f"models--{repo_id.replace('/', '--')}"
 
 
 def is_downloaded(spec: ModelSpec) -> bool:
     """True if the weights are already on disk (so loading will not trigger a download)."""
     if spec.local or Path(spec.source).exists():
         return Path(spec.source).exists()
-    from huggingface_hub.constants import HF_HUB_CACHE
-    snaps = Path(HF_HUB_CACHE) / f"models--{spec.source.replace('/', '--')}" / "snapshots"
+    if not spec.source or "/" not in spec.source:
+        return False
+    snaps = hf_cache_dir(spec.source) / "snapshots"
     if not snaps.is_dir():
         return False
     big = "unet" if spec.family == "sdxl" else "transformer"
     return any((snap / big).is_dir() and any((snap / big).glob("*.safetensors")) for snap in snaps.iterdir())
 
 
+def on_disk_bytes(spec: ModelSpec) -> int:
+    """Bytes the model occupies locally: the file, or the repo's blobs in the HF cache (plus local caches)."""
+    total = 0
+    if spec.local or Path(spec.source).is_file():
+        p = Path(spec.source)
+        return p.stat().st_size if p.exists() else 0
+    if spec.source and "/" in spec.source:
+        blobs = hf_cache_dir(spec.source) / "blobs"
+        if blobs.is_dir():
+            total += sum(f.stat().st_size for f in blobs.iterdir() if f.is_file())
+    cache = MODELS_DIR / "cache"
+    if cache.is_dir():
+        for d in cache.glob(f"{spec.key}-*"):
+            total += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+    return total
+
+
 def find_lora(name: str) -> Path | None:
-    """models/loras/<name>.safetensors, matched case-insensitively and ignoring punctuation."""
+    """models/loras/<name>.safetensors, matched by file stem or registry display name,
+    case-insensitively and ignoring punctuation."""
+    import registry
     want = _slug(name)
     for p in LORAS_DIR.glob("*.safetensors"):
         if _slug(p.stem) == want:
             return p
+    for stem, e in registry.lora_entries(include_missing=False).items():
+        if _slug(e["name"]) == want:
+            return Path(e["path"])
     return None
 
 
-def available_loras() -> list[str]:
-    return sorted(p.stem for p in LORAS_DIR.glob("*.safetensors"))
+def available_loras(family: str | None = None) -> list[str]:
+    """Stems of the enabled LoRA files, optionally only those trained for one model family."""
+    import registry
+    return sorted(stem for stem, e in registry.lora_entries(include_missing=False).items()
+                  if e.get("enabled", True) and (family is None or e.get("family") == family))
+
+
+def lora_info(name: str) -> dict:
+    """Registry metadata for a LoRA named by stem or display name ({} if unknown)."""
+    import registry
+    path = find_lora(name)
+    if not path:
+        return {}
+    return registry.lora_entries(include_missing=False).get(path.stem, {})
 
 
 # ----------------------------------------------------------------------------- prompt weighting
@@ -258,7 +325,9 @@ class ModelManager:
     """Holds one loaded pipeline at a time and swaps it on demand (VRAM is freed on swap)."""
 
     def __init__(self, device: str = "cuda"):
+        import threading
         self.device = device
+        self.lock = threading.RLock()        # one GPU job at a time (generation, upscaling, loading)
         self.spec: ModelSpec | None = None
         self.pipe = None
         self.scheduler_name: str = ""
@@ -467,6 +536,10 @@ class ModelManager:
             if not path:
                 notes.append(f"LoRA '{name}' not found in {LORAS_DIR} (have: {', '.join(available_loras()) or 'none'})")
                 continue
+            info = lora_info(path.stem)
+            if info.get("family") and self.spec and info["family"] != self.spec.family:
+                notes.append(f"LoRA {path.stem} is trained for {info['family']} models, not {self.spec.name}; ignored")
+                continue
             adapter = _slug(path.stem).replace("-", "_")
             if adapter not in self._loaded_loras:
                 log(f"Loading LoRA {path.name} ...")
@@ -602,8 +675,8 @@ if __name__ == "__main__":
     if len(_sys.argv) > 1 and _sys.argv[1] == "fetch-loras":
         fetch_starter_loras()
         raise SystemExit(0)
-    for m in all_models():
+    for m in all_models(include_disabled=True):
         where = "downloaded" if is_downloaded(m) else f"not downloaded (~{m.download_gb:g} GB)"
-        print(f"{m.key:12} {m.name:26} {m.steps:>3} steps  cfg {m.guidance:<4g} {where}")
+        print(f"{m.key:12} {m.name:26} {m.steps:>3} steps  cfg {m.guidance:<4g} {m.family:7} {where}")
         print(f"{'':12} {m.description}")
     print("LoRAs:", ", ".join(available_loras()) or "none in models/loras/")

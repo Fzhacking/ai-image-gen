@@ -30,12 +30,12 @@ IMAGES = Path(__file__).resolve().parent / "images"
 OWNER = "Frazile AI"
 PRODUCT = "AI Image Generator"
 SUBTITLE = "Technical Documentation, Workflows and Requirements"
-VERSION = "2.0"
+VERSION = "2.1"
 DATE = "22 October 2026"
 PLATFORM = "NVIDIA GeForce RTX 3090, Windows 11, Python 3.12"
-TAGLINE = ("Z-Image Turbo, Stable Diffusion XL and its best fine-tunes, FLUX.1, LoRAs and Real-ESRGAN, served locally with "
-           "Gradio in the Frazile AI studio UI, with per-image GPU telemetry recorded in SQLite and a live "
-           "Admin panel.")
+TAGLINE = ("Z-Image Turbo, Stable Diffusion XL and its best fine-tunes, Qwen-Image, FLUX.1, LoRAs and Real-ESRGAN, served "
+           "locally with Gradio in the Frazile AI studio UI, with per-image GPU telemetry recorded in SQLite and an "
+           "Admin panel that manages models, LoRAs and downloads and shows live system statistics.")
 
 PINK, PINK_DARK, YELLOW, INK, MUTED, RULE = (
     colors.HexColor("#EC4899"), colors.HexColor("#BE185D"), colors.HexColor("#FACC15"),
@@ -157,7 +157,7 @@ def sec_overview():
         P(f"{PRODUCT} is a self-hosted application that turns a plain-English prompt into an image using Stable "
           "Diffusion XL, its best community fine-tunes, or FLUX.1, running entirely on a local NVIDIA GPU. No image "
           "data leaves the machine and there is no per-image cost."),
-        P("The project was built on 21 and 22 October 2026 and grew through eight increments:"),
+        P("The project was built on 21 and 22 October 2026 and grew through eleven increments:"),
         bullets([
             "A command-line script that runs Stable Diffusion XL on the GPU.",
             "A local web interface so a prompt can be typed and the result viewed in a browser.",
@@ -167,18 +167,23 @@ def sec_overview():
             "A model registry: six SDXL-family checkpoints, Z-Image Turbo and FLUX.1 schnell, automatic model choice by style, local checkpoints, LoRAs, prompt weighting and per-model samplers.",
             "The Frazile AI studio interface: dark theme with pink-to-yellow accents, full-width layout, and an Upscale bar that appears after generation.",
             "An Admin panel with live CPU, GPU, memory, storage, network and power telemetry, plus a Docker image for container deployment.",
+            "Z-Image Turbo as the default model, loaded shard by shard onto the GPU with a cached bf16 copy.",
+            "Starter LoRAs with a LoRAs box, and Qwen-Image (20B) in 4-bit with the Lightning 8-step LoRA.",
+            "Model and LoRA management in the Admin panel: a persistent registry, background downloads from Hugging Face, Civitai, URLs and local files, per-LoRA family and trigger words, settings, logs; plus quick-hint chips, live header, thumbnails and reuse actions in the Studio and History tabs.",
         ], numbered=True),
         H2("1.2 Key capabilities", "s1-2"),
         bullets([
             "Text-to-image generation with eight built-in models: Z-Image Turbo (the default), SDXL base 1.0, Juggernaut XL v9, RealVisXL V5.0, DreamShaper XL v2 Turbo, Playground v2.5, Animagine XL 3.1 and FLUX.1 schnell, all in 16-bit precision (FLUX in 4-bit on 24 GB cards).",
-            "Any SDXL checkpoint dropped into models/checkpoints/ and any SDXL LoRA in models/loras/ is usable immediately after a restart.",
+            "Models and LoRAs added from the Admin panel (Hugging Face repo or file, Civitai link, direct URL, local path or upload) are usable as soon as their background download finishes, without a restart; files dropped into models/checkpoints/ and models/loras/ by hand still work.",
+            "Every model's defaults (steps, guidance, sampler, description, aliases, auto-pick styles, enabled, start-up) and every LoRA's family, trigger words and default weight are editable in the Admin panel and persisted in models/registry.json.",
             "Prompt-driven control of model, LoRAs, emphasis weighting, aspect ratio, exact resolution, orientation, quality, fidelity, art style, image count, seed, steps and guidance.",
             "Automatic model selection from style words (photorealistic goes to Juggernaut, anime to Animagine, painting to Playground, digital art to DreamShaper).",
             "Live interpretation line under the prompt box showing exactly what will be generated, with which model, before the button is pressed.",
             "Tiled Real-ESRGAN upscaling to 2K, 4K, 8K or any exact size, either from the prompt or afterwards from the Upscale bar, with automatic centre crop.",
             "Full telemetry per image: inference time, steps per second, peak VRAM, GPU temperature and power before and after, clocks, fan, performance state, driver and library versions.",
             "Persistent history in SQLite with search, aggregate statistics, and click-to-view of any past image with its full record, including later upscales.",
-            "Admin panel: nine live tiles and six detail sections covering GPU, CPU, memory and storage, network, power, software and the app process, with optional 5-second auto-refresh.",
+            "Admin panel with eight sub-tabs: Overview (system and activity tiles, per-model statistics), Models, LoRAs, Add, Downloads, System (nine live tiles and six detail sections), Settings (start-up model, tokens, housekeeping, admin lock) and Logs.",
+            "Studio conveniences: quick-hint chips, a live header with loaded model, VRAM, temperature and running downloads, LoRA trigger-word reminders, Reuse seed and New variation buttons; History with model filter, thumbnail grid, reuse prompt (with or without seed) and delete.",
             "Command-line tools for batch generation with any model and LoRA, upscaling an existing image, querying the database and dumping system telemetry.",
             "A Dockerfile and docker-compose.yml for running the whole studio as a GPU container.",
         ]),
@@ -199,12 +204,12 @@ def sec_overview():
         table(["Section", "Contents"], [
             ["2. Requirements", "Functional and non-functional requirements, hardware and software matrix, model assets"],
             ["3. Architecture", "Components, pipeline diagram, data flow, design decisions, concurrency"],
-            ["4. Workflows", "Setup, generation, choosing models, LoRAs, upscaling, history, Admin panel, Docker, maintenance"],
+            ["4. Workflows", "Setup, generation, choosing models, LoRAs, upscaling, history, adding models and LoRAs, Admin panel, Docker, maintenance"],
             ["5. Module reference", "Every source file, its public functions and their contracts"],
             ["6. Models", "The model registry, automatic selection, samplers, prompt weighting, LoRAs, FLUX"],
             ["7. Prompt language", "Complete reference of words the parser understands"],
             ["8. Database", "Schema of generations.db, every column explained, example queries"],
-            ["9. Admin panel", "Every tile and section of the live system panel and where its numbers come from"],
+            ["9. Admin panel", "Model and LoRA management, sources and downloads, settings and logs, every tile and section of the system panel"],
             ["10. Performance", "Measured timings and resource use on the RTX 3090 for every model"],
             ["11. Deployment and Docker", "Container image, compose file, volumes, GPU access, host requirements"],
             ["12. Operations", "Running, stopping, troubleshooting, known issues, backup, security"],
@@ -239,6 +244,11 @@ def sec_requirements():
             ["FR-18", "Present the application in Frazile AI branding with a full-width layout.", "Done (v2.0)"],
             ["FR-19", "Provide an Admin panel with live CPU, GPU, memory, storage, network, power and software information.", "Done (v2.0)"],
             ["FR-20", "Run the whole application as a GPU-enabled Docker container.", "Done, untested on the development machine (no Docker installed)"],
+            ["FR-21", "Add models and LoRAs from the Admin panel: Hugging Face repos and files, Civitai links, direct URLs, local files and uploads, with background downloads and progress.", "Done (v2.1)"],
+            ["FR-22", "Edit any model's defaults and any LoRA's family, trigger words and weight; enable, disable, load, unload, delete and choose the start-up model from the Admin panel.", "Done (v2.1)"],
+            ["FR-23", "Record which family a LoRA was trained for, route Auto to a matching model and never apply a LoRA to the wrong family.", "Done (v2.1)"],
+            ["FR-24", "Show the application's own log and generation statistics per model in the Admin panel.", "Done (v2.1)"],
+            ["FR-25", "Protect destructive Admin actions with a confirmation and an optional password when the server is reachable from other machines.", "Done (v2.1)"],
         ], [0.6, 4, 1.1]),
         H2("2.2 Non-functional requirements", "s2-2"),
         table(["ID", "Requirement", "How it is met"], [
@@ -251,7 +261,9 @@ def sec_requirements():
             ["NFR-07", "All persistent state is in plain files that can be backed up by copying.", "PNG files in outputs/, SQLite file generations.db, weights in models/ and the HF cache."],
             ["NFR-08", "The database schema can evolve without losing data.", "db.connect() adds missing columns automatically."],
             ["NFR-09", "The Admin panel must not slow the GPU work.", "A refresh costs about 0.7 s after the first; folder sizes and thread counts are cached for 60 and 30 s."],
-            ["NFR-10", "Code is dependency-light and readable: no framework beyond Gradio and diffusers.", "Eight Python modules, about 2,500 lines in total."],
+            ["NFR-10", "Code is dependency-light and readable: no framework beyond Gradio and diffusers.", "Fourteen Python modules, about 4,300 lines in total."],
+            ["NFR-11", "Downloads must not block generation or the interface.", "Downloads run in a two-worker thread pool; the GPU work and the statistics refreshes use separate Gradio queues."],
+            ["NFR-12", "Admin edits must survive restarts and be inspectable.", "models/registry.json, written atomically; the built-in list stays in code and only overrides are stored."],
         ], [0.6, 2.4, 2.6]),
         H2("2.3 Hardware requirements", "s2-3"),
         table(["Component", "Minimum", "Recommended", "Verified on"], [
@@ -320,10 +332,15 @@ def sec_architecture():
         H1("3. System Architecture", "s3"),
         H2("3.1 Component overview", "s3-1"),
         P("The application is a single Python process. Gradio serves the browser interface and calls plain Python "
-          "functions; those functions use seven project modules, one resident diffusion model and the upscaler."),
+          "functions; those functions use thirteen project modules, one resident diffusion model and the upscaler."),
         table(["Component", "File", "Responsibility"], [
-            ["Web application", "app.py", "Builds the Gradio UI and theme, owns the ModelManager and the Upscaler, orchestrates one generation end to end, renders the details report, serves the History and Admin tabs."],
-            ["Model registry", "models.py", "Registry of built-in and local models, ModelManager (load, swap, free VRAM), samplers, LoRA activation, compel prompt encoding, FLUX quantised loading."],
+            ["Web application", "app.py", "Builds the Studio and History tabs, owns the ModelManager and the Upscaler, orchestrates one generation end to end, renders the details report, mounts the Admin panel."],
+            ["Admin panel", "admin_ui.py", "Eight Admin sub-tabs and their handlers: models, LoRAs, add, downloads, system, settings, logs."],
+            ["Model registry", "models.py", "Built-in specs, local checkpoints and admin-added models merged with registry overrides; ModelManager (load, swap, free VRAM, lock), samplers, family-aware LoRA activation, compel prompt encoding, quantised loaders for Z-Image, Qwen-Image and FLUX."],
+            ["Persistent registry", "registry.py", "models/registry.json: settings, custom models and overrides, LoRA metadata (family, trigger words, weight, source, enabled)."],
+            ["Downloads", "downloads.py", "Source inspection (Hugging Face repo or file, Civitai, URL, local path), the background JobManager with progress, resumable file downloads, repo snapshots with byte progress, deletion of model files."],
+            ["Theme and shared UI", "ui_theme.py, ui_common.py", "Colours, Gradio theme and CSS; dropdown choices, header, model cards, tiles, key-value tables and the downloads list."],
+            ["Log buffer", "applog.py", "Tees stdout and stderr into a ring buffer for the Logs tab."],
             ["Prompt parser", "prompt_parser.py", "Turns free text into a Settings object: model, LoRAs, size, steps, guidance, count, seed, style, upscale target. Pure function, no GPU."],
             ["Upscaler", "upscaler.py", "Wraps Real-ESRGAN through spandrel; tiled x4 passes; resizes or crops to the requested target."],
             ["GPU telemetry", "gpu_info.py", "Static GPU facts from torch; live temperature, power, clocks, fan and load from nvidia-smi."],
@@ -387,7 +404,8 @@ def sec_architecture():
           "looks the same regardless of the browser's preference."),
         H2("3.5 Concurrency model", "s3-5"),
         P("Gradio runs the generate and upscale functions in a worker thread and queues additional requests. The "
-          "GPU is used by one job at a time. The History and Admin tabs read the database and the system on their "
+          "GPU is used by one job at a time (a lock in ModelManager and the \"gpu\" queue id enforce it, while the "
+          "statistics handlers run on their own queue). The History and Admin tabs read the database and the system on their "
           "own threads; SQLite handles the concurrent reads safely because each call opens its own short-lived "
           "connection, and the Admin collectors never touch the pipeline."),
     ]
@@ -450,13 +468,28 @@ def sec_workflows():
             "Click a row. The image (upscaled if one exists) and its full details appear below the table.",
             "For scripted access, run `db.py`, `db.py 12` or `db.py stats` with the virtual environment's Python.",
         ], numbered=True),
-        H2("4.7 Watching the machine: the Admin tab", "s4-7"),
+        H2("4.7 Adding a model or a LoRA", "s4-7"),
         bullets([
-            "Open the Admin tab. It refreshes on open and shows nine tiles and six sections; see section 9 for every field.",
-            "Press Refresh for a new sample, or tick Auto-refresh every 5 s while a generation runs to watch VRAM, temperature and power move.",
-            "Tick \"Check internet reachability\" to add a TCP connect test to Hugging Face, GitHub and PyPI; it is off by default because an offline machine would wait 2 s per host.",
+            "Open Admin, then Add. Paste a source: a Hugging Face repo id such as RunDiffusion/Juggernaut-XL-v9, a file in a repo such as nerijs/pixel-art-xl/pixel-art-xl.safetensors, a Civitai model link, a direct https link to a .safetensors file, or a local path. Press Check.",
+            "The result line says what was found: pipeline class and family for a diffusers repo, file name and size for a file, type, base model and trigger words for a Civitai entry, and warnings (gated repo, token needed, several files). The form is pre-filled: Add as (model, checkpoint file or LoRA), key, name, family, trigger words, default steps, guidance and sampler.",
+            "Press Add. A diffusers repo is registered at once and downloaded in the background if Download now is ticked; a file is downloaded into models/checkpoints/ or models/loras/ and registered when it finishes. The Downloads tab shows bytes, speed and remaining time; the header shows the number of running downloads.",
+            "The new model appears in the Model box (and answers to \"model <key>\" in the prompt) and the new LoRA in the LoRAs box without a restart. Small files can also be uploaded from the browser at the bottom of the Add tab.",
+            "To remove something: Models tab, select it, Remove from list (a built-in is reset to its defaults instead) or tick the confirmation and Delete files from disk; LoRAs tab, select it, tick the confirmation and Delete LoRA file.",
         ], numbered=True),
-        H2("4.8 Batch generation from the command line", "s4-8"),
+        H2("4.8 Managing models and LoRAs", "s4-8"),
+        bullets([
+            "Models tab: click a row. Edit name, description, default steps and guidance, sampler, weight variant, aliases, auto-pick styles, negative-prompt support and Enabled, then Save changes. Load now loads it immediately (with progress); Download in background fetches it without loading; Set as start-up model changes what loads when the app starts; Unload current model frees the VRAM.",
+            "LoRAs tab: click a row. Set the family it was trained for (SDXL, Z-Image, Qwen-Image or FLUX), its trigger words, default weight, description, source and tags, then Save. Try it in the Studio fills a test prompt with the trigger words, the LoRA tag and a matching model and switches to the Studio tab.",
+            "Settings tab: start-up model, the weight used for LoRAs ticked in the LoRAs box when they have no weight of their own, the default negative prompt, the Hugging Face token (required for FLUX and gated repos; Check login verifies it), the Civitai token, clean-up of generations older than N days, and the admin password lock.",
+        ], numbered=True),
+        H2("4.9 Watching the machine: Overview, System and Logs", "s4-9"),
+        bullets([
+            "Admin, Overview: system tiles, activity tiles (images today and this week, GPU minutes in 24 h, loaded and start-up model, models on disk, LoRAs, downloads, outputs size, Hugging Face login) and the per-model statistics table.",
+            "Admin, System: the nine tiles and six detail sections of section 9.4. Press Refresh for a new sample, or tick Auto-refresh every 5 s while a generation runs to watch VRAM, temperature and power move; statistics keep refreshing during generation.",
+            "Tick \"Check internet reachability\" to add a TCP connect test to Hugging Face, GitHub and PyPI; it is off by default because an offline machine would wait 2 s per host.",
+            "Admin, Logs: the last lines the app printed (model loads, generations, LoRA notes, downloads, errors) with a text filter, an errors-only level and auto-refresh.",
+        ], numbered=True),
+        H2("4.10 Batch generation from the command line", "s4-10"),
         code('.\\.venv\\Scripts\\python.exe generate.py --list-models\n'
              '.\\.venv\\Scripts\\python.exe generate.py "a red sports car" --model juggernaut --seed 42 --count 4\n'
              '.\\.venv\\Scripts\\python.exe generate.py "cat astronaut" --model dreamshaper --lora pixel-style:0.7\n'
@@ -488,9 +521,9 @@ def sec_workflows():
         ]),
         H2("4.13 Development workflow", "s4-13"),
         bullets([
-            "Edit a module. Self-tests: `python prompt_parser.py` prints how sample prompts are interpreted, `python models.py` lists the registry and what is on disk, `python sysinfo.py` dumps the Admin data as JSON, `python db.py stats` exercises the schema.",
-            "Compile-check with `python -m py_compile app.py models.py prompt_parser.py sysinfo.py`.",
-            "Restart the app. For automated checks, gradio_client can call /generate, /upscale, /refresh_history and /admin_refresh, which is how the increments in this project were verified.",
+            "Edit a module. Self-tests: `python prompt_parser.py` prints how sample prompts are interpreted, `python models.py` lists the registry and what is on disk, `python registry.py` prints the registry file, `python downloads.py <source>` inspects a source, `python sysinfo.py` dumps the Admin data as JSON, `python db.py stats` exercises the schema.",
+            "Compile-check with `python -m py_compile app.py admin_ui.py models.py registry.py downloads.py prompt_parser.py sysinfo.py`.",
+            "Restart the app. For automated checks, gradio_client can call /generate, /upscale, /refresh_history, /overview_refresh, /system_refresh, /check_source, /add_source, /save_lora and /logs_text, which is how the increments in this project were verified.",
             "Rebuild this documentation with `python docs-src\\build_pdf.py`.",
             "Commit and push: the repository is https://github.com/Fzhacking/ai-image-gen.",
         ], numbered=True),
@@ -500,42 +533,77 @@ def sec_workflows():
 def sec_modules():
     return [
         H1("5. Module Reference", "s5"),
-        H2("5.1 app.py (886 lines)", "s5-1"),
-        P("Entry point of the web application."),
+        H2("5.1 app.py (about 640 lines)", "s5-1"),
+        P("Entry point of the web application: the Studio and History tabs, generation, and the mounting of the Admin panel."),
         table(["Name", "Kind", "Description"], [
-            ["STARTUP_MODEL, OUTPUT_DIR, DEFAULT_NEGATIVE, UPSCALE_CHOICES, HELP", "constants", "Model loaded at start (zimage), outputs path, default negative prompt, the 2K/4K/8K choices, and the prompt help table."],
-            ["PINK, YELLOW, GRADIENT, STATUS, CSS", "constants", "Brand colour ramps, the accent gradient, the four reserved status colours with icons, and the stylesheet for header, tiles and meters."],
-            ["build_theme()", "function", "A Gradio Base theme with the Frazile AI palette applied to light and dark mode alike; only variables the installed Gradio accepts are set."],
-            ["header_html(static_gpu)", "function", "The branded header with GPU, CUDA, torch and diffusers pills."],
-            ["models_markdown()", "function", "The Models accordion: every model, defaults, on-disk state, plus LoRA and FLUX instructions."],
-            ["MANAGER, UPSCALER, STATIC_GPU, MODEL_CHOICES", "globals", "The ModelManager (with sdxl loaded), the Upscaler, static GPU facts, and the dropdown choices, created once at import."],
-            ["pick_model(settings, choice)", "function", "Resolves the model: prompt directive, then dropdown, then style-based auto choice limited to downloaded models. Returns (spec, note)."],
-            ["preview(prompt, choice)", "function", "The live \"Will generate\" line including the model and notes."],
-            ["details_markdown(rec)", "function", "Renders one database record as the Markdown report shown under the gallery and in History."],
-            ["upscale_record(rec, target_px, exact_size)", "function", "Upscales a record's native PNG, saves it, returns the eight upscale fields."],
-            ["generate(prompt, negative, model_choice, progress)", "function", "Runs the full pipeline for all requested images. Returns gallery paths, report, records state, selection, Upscale bar visibility, hint and loaded line."],
-            ["clear_all(), upscale_hint(), on_select(), upscale()", "functions", "Clear button, the hint under the Upscale bar, gallery selection tracking, and the Upscale bar handler that updates rows with db.update()."],
-            ["history_table(), history_stats(), refresh_history(), select_history()", "functions", "History tab, unchanged in behaviour but with a model column."],
-            ["tile(), _kv(), _throttle_text(), gpu_energy_estimate(), admin_refresh(check_internet)", "functions", "Admin panel rendering: HTML stat tiles with meters and status, key-value tables, decoded throttle bits, the GPU energy estimate, and the collector that returns all seven outputs."],
+            ["OUTPUT_DIR, UPSCALE_CHOICES, HELP, EMPTY_STATE, THUMB_DIR", "constants", "Outputs path, the 2K/4K/8K choices, the prompt help table, the empty-gallery message and the thumbnail cache folder."],
+            ["MANAGER, STARTUP_MODEL, UPSCALER, STATIC_GPU", "globals", "The ModelManager, the start-up model (FRAZILE_STARTUP_MODEL, else the registry setting, \"none\" to skip), the Upscaler and static GPU facts, created once at import. applog.install() runs first so every later print reaches the Logs tab."],
+            ["ui_lora_weight(stem), default_negative()", "functions", "Registry-backed defaults: a LoRA's own weight (else the global setting) and the default negative prompt."],
+            ["pick_model(settings, choice)", "function", "Resolves the model: prompt directive, then dropdown, then (Auto) a model of the family the requested LoRAs were trained for, then style-based choice among SDXL specialists. Returns (spec, note)."],
+            ["add_ui_loras(), trigger_hints(), preview()", "functions", "Merge ticked LoRAs into the settings, remind of missing trigger words, and render the live \"Will generate\" line (including whether a load or download is coming)."],
+            ["details_markdown(rec), upscale_record(rec, target_px, exact_size)", "functions", "The Markdown report for one record; upscaling of a record's native PNG."],
+            ["generate(prompt, negative, model_choice, loras_ui, progress)", "function", "Runs the full pipeline under the ModelManager lock for all requested images; returns gallery, report, records, selection, Upscale bar, hint, loaded line and empty-state visibility."],
+            ["clear_all(), upscale_hint(), on_select(), upscale()", "functions", "Clear button, the hint under the Upscale bar, gallery selection tracking, and the Upscale bar handler."],
+            ["toggle_chip(), chip_seed(), reuse_seed(), drop_seed()", "functions", "Quick-hint chips (a hint in the same group replaces its siblings), the random-seed chip, Reuse this seed and New variation."],
+            ["thumbnail_for(), history_rows(), history_table(), history_gallery(), history_stats(), refresh_history(), show_record(), select_history(), select_history_thumb(), reuse_prompt(), delete_history()", "functions", "History tab: 384 px JPEG thumbnails cached in outputs/.thumbs/, filters (search, model, upscaled only, limit), table and grid views, details, reuse prompt with or without seed (switches to the Studio tab) and deletion."],
+            ["refresh_header()", "function", "The header with loaded model, VRAM, temperature, GPU load and running downloads, refreshed by a 5 s timer."],
         ], [1.6, 0.6, 3.2]),
-        P("The UI is a gr.Blocks with fill_width=True and three tabs. Events: prompt change and model change to preview; "
-          "Generate click and Enter to generate; Clear; gallery select to on_select; Upscale click to upscale; History "
-          "tab select, Refresh and search to refresh_history; row select to select_history; Admin tab select, Refresh "
-          "and a 5 s gr.Timer to admin_refresh, with the auto-refresh checkbox toggling the timer. launch() reads "
-          "GRADIO_SERVER_NAME, GRADIO_SERVER_PORT and FRAZILE_NO_BROWSER and passes the theme and CSS."),
-        H2("5.2 models.py (436 lines)", "s5-2"),
+        P("The UI is a gr.Blocks with fill_width=True and three tabs (Studio, History, Admin). GPU events (generate, "
+          "upscale, admin load and unload) share the concurrency id \"gpu\" so they queue behind each other; statistics "
+          "and timers use \"stats\" with a limit of three so they keep refreshing during a generation. launch() reads "
+          "GRADIO_SERVER_NAME, GRADIO_SERVER_PORT and FRAZILE_NO_BROWSER, allows 8 GB uploads and passes the theme and CSS."),
+        H2("5.2 models.py (about 680 lines)", "s5-2"),
         table(["Name", "Kind", "Description"], [
-            ["ModelSpec", "dataclass", "key, name, source (HF repo or path), family (sdxl or flux), steps, guidance, scheduler, variant, negative, aliases, styles, description, download_gb, local."],
-            ["BUILTIN", "constant", "The eight built-in specs with their defaults and recommended samplers."],
-            ["local_checkpoints(), all_models(), model_words()", "functions", "Scan models/checkpoints/, the full list, and every key and alias for the parser."],
-            ["resolve(name)", "function", "Finds a model by key, alias, name, repo id or path; raises KeyError if unknown."],
-            ["model_for_style(style), is_downloaded(spec), display_name(source)", "functions", "Auto-selection lookup, on-disk check against the HF cache, and source-to-name mapping for the UI."],
-            ["find_lora(name), available_loras()", "functions", "Case- and punctuation-insensitive lookup in models/loras/."],
+            ["ModelSpec", "dataclass", "key, name, source (HF repo or path), family (sdxl, zimage, qwen or flux), steps, guidance, scheduler, variant, negative, aliases, styles, description, download_gb, local."],
+            ["BUILTIN", "constant", "The nine built-in specs with their defaults and recommended samplers."],
+            ["local_checkpoints(), all_models(include_disabled), family_models(family), model_words()", "functions", "Scan models/checkpoints/; the merged list (built-ins with registry overrides, local checkpoints, admin-added models, minus disabled ones); the on-disk models of one family in preferred order; every key and alias for the parser."],
+            ["resolve(name)", "function", "Finds a model by key, alias, name, repo id or path, including disabled ones; raises KeyError if unknown."],
+            ["model_for_style(style), is_downloaded(spec), on_disk_bytes(spec), hf_cache_dir(repo), display_name(source), spec_for_source(source)", "functions", "Auto-selection lookup, on-disk check and size (file, HF cache blobs, converted caches), cache folder of a repo, and source-to-spec mapping for the UI."],
+            ["find_lora(name), available_loras(family), lora_info(name)", "functions", "Lookup by file stem or registry display name; the enabled LoRA stems, optionally of one family; a LoRA's registry metadata."],
             ["a1111_to_compel(prompt)", "function", "Rewrites (word:1.3) into compel's (word)1.3."],
-            ["ModelManager", "class", "Holds one pipeline. load() dispatches to the SDXL, Z-Image or FLUX loader and reports progress; unload() frees VRAM; apply_loras() loads once and activates with weights; encode() returns weighted embeddings via compel with chunk padding, falling back to plain text; generation_kwargs() adds FLUX-specific arguments."],
+            ["ModelManager", "class", "Holds one pipeline and a re-entrant lock. load() dispatches to the SDXL, Z-Image, Qwen-Image or FLUX loader; unload() frees VRAM; apply_loras() skips LoRAs of another family, loads once and activates with weights on top of base adapters; encode() returns weighted embeddings via compel; release_cache(); generation_kwargs() adds family-specific arguments."],
+            ["STARTER_LORAS, fetch_starter_loras()", "constant, function", "The two documented LoRAs and the `models.py fetch-loras` command."],
         ], [1.6, 0.6, 3.2]),
-        P("Running the module directly lists every model and whether it is downloaded."),
-        H2("5.3 prompt_parser.py (315 lines)", "s5-3"),
+        P("Running the module directly lists every model, its family and whether it is downloaded."),
+        H2("5.3 registry.py (about 300 lines)", "s5-3"),
+        table(["Name", "Kind", "Description"], [
+            ["REGISTRY_PATH, FAMILIES, SCHEDULERS, FAMILY_PREFERRED, DEFAULT_SETTINGS, OVERRIDABLE", "constants", "models/registry.json; the four families with descriptions; sampler names; which models to prefer per family; default settings (startup_model, ui_lora_weight, default_negative, civitai_token, auto_release_vram, outputs_keep_days); the ModelSpec fields an admin may override on a built-in."],
+            ["load(), save()", "functions", "Cached read (re-read when the file changes) and atomic write with an updated_at stamp."],
+            ["setting(key), set_settings(key=value ...)", "functions", "Settings access."],
+            ["apply_overrides(spec), custom_models(), model_entry(), is_enabled(), is_custom(), upsert_model(key, custom, key=value ...), remove_model(key), set_enabled()", "functions", "Model entries: overrides for built-ins and local files, full specs for admin-added models, enable flag, create or update, delete or reset."],
+            ["lora_entries(include_missing), lora(stem), set_lora(stem, key=value ...), forget_lora(stem)", "functions", "LoRA records: files in models/loras/ merged with their metadata (name, family, trigger, weight, description, source, enabled, tags, size, missing flag)."],
+            ["summary()", "function", "Counts for the Admin Overview."],
+        ], [1.6, 0.6, 3.2]),
+        H2("5.4 downloads.py (about 480 lines)", "s5-4"),
+        table(["Name", "Kind", "Description"], [
+            ["Job, JobManager, JOBS", "dataclass, class, global", "A download with status, bytes done and total, speed, ETA, message, log and a cancel flag; a two-worker thread pool that runs job functions and keeps the list; the shared instance."],
+            ["inspect_source(text)", "function", "Classifies a source as hf_repo, hf_file, civitai, url or local and gathers what it would give: pipeline class and family (from model_index.json), fp16 variant, sizes, gated flag, Civitai type, base model and trigger words, warnings. Never raises."],
+            ["download_file(info, as_type, rename)", "function", "Job function: streams one .safetensors file into models/checkpoints/ or models/loras/ with resume (Range), progress, Hugging Face and Civitai tokens, and refuses HTML answers."],
+            ["download_repo(spec)", "function", "Job function: snapshot_download of a diffusers repo with ignore patterns per family (fp16 only for SDXL, no bin or onnx, no Qwen text encoder) and byte progress read from the cache folder; fetches the Qwen 4-bit text encoder and Lightning LoRA too."],
+            ["delete_model_files(spec)", "function", "Removes a local file or the repo's HF cache folder and the converted caches under models/cache/."],
+            ["hf_token(), civitai_token(), safe_stem(), unique_path(), human_bytes()", "functions", "Helpers."],
+        ], [1.6, 0.6, 3.2]),
+        P("Running `python downloads.py <source>` prints the inspection result as JSON."),
+        H2("5.5 admin_ui.py (about 600 lines)", "s5-5"),
+        table(["Name", "Kind", "Description"], [
+            ["build_admin(manager, upscaler, static_gpu, prompt_box, tabs, model_choice, lora_choice, loaded_md)", "function", "Builds the eight sub-tabs inside the Admin tab and wires their events; receives the Studio's prompt box, tab bar and dropdowns so Admin actions can update them."],
+            ["guard(unlocked, confirm), unlock()", "functions", "Confirmation box and optional FRAZILE_ADMIN_PASSWORD check for destructive actions."],
+            ["overview_refresh()", "function", "System tiles, activity tiles and the per-model statistics table."],
+            ["models_df(), select_model(), model_editor_values(), save_model(), load_model(), unload_model(), download_model(), set_startup(), reset_or_remove_model(), delete_model_files()", "functions", "Models tab."],
+            ["loras_df(), select_lora(), lora_editor_values(), save_lora(), try_lora(), delete_lora()", "functions", "LoRAs tab; try_lora fills a test prompt and switches to the Studio."],
+            ["check_source(), add_source(), upload_file()", "functions", "Add tab: inspection with form pre-fill, registration plus background download, browser upload."],
+            ["downloads_refresh(), cancel_job(), clear_jobs()", "functions", "Downloads tab."],
+            ["system_refresh(check_internet)", "function", "The nine tiles and six sections of the System tab."],
+            ["settings_values(), save_settings(), hf_status_html(), save_hf_token(), cleanup_outputs()", "functions", "Settings tab."],
+            ["logs_text(n, contains, level)", "function", "Logs tab."],
+        ], [1.6, 0.6, 3.2]),
+        H2("5.6 ui_theme.py, ui_common.py, applog.py", "s5-6"),
+        table(["Module", "Contents"], [
+            ["ui_theme.py (about 190 lines)", "Colour constants, build_theme() (Frazile AI palette applied to light and dark mode alike), CSS for header, chips, cards, badges, tiles, meters, jobs and logs, and the badge helpers."],
+            ["ui_common.py (about 170 lines)", "model_choices() and lora_choices() for the Studio dropdowns with update helpers; header_html() with live pills; loaded_line(); model_cards_html(); tile(), kv() and jobs_html()."],
+            ["applog.py (about 120 lines)", "install() tees stdout and stderr into a 3,000-line ring buffer (keeping only the final state of progress bars; lines mentioning error, exception, traceback or failed count as errors); log(), tail(), tail_text(), counts()."],
+        ], [1.6, 3.2]),
+        H2("5.7 prompt_parser.py (315 lines)", "s5-7"),
         table(["Name", "Kind", "Description"], [
             ["Settings", "dataclass", "prompt, width, height, steps, guidance, count, seed, style, upscale_to, exact_size, notes, model, loras, steps_explicit, guidance_explicit, quality, fidelity. Methods: summary(), upscaled_size(), apply_defaults(base_steps, base_guidance)."],
             ["RATIO_BUCKETS, ORIENTATION_WORDS, STYLE_SUFFIXES, UPSCALE_TARGETS", "constants", "As in v1.0: eleven SDXL buckets, orientation regexes, twelve style presets, upscale words."],
@@ -543,7 +611,7 @@ def sec_modules():
         ], [1.6, 0.6, 3.2]),
         P("Quality and fidelity words no longer set fixed numbers; they are recorded and applied relative to the chosen "
           "model's defaults. Running the module directly prints the interpretation of twelve sample prompts."),
-        H2("5.4 sysinfo.py (358 lines)", "s5-4"),
+        H2("5.8 sysinfo.py (358 lines)", "s5-8"),
         table(["Name", "Kind", "Description"], [
             ["human_bytes(), human_duration()", "functions", "Formatting helpers used by the Admin panel."],
             ["cpu()", "function", "Processor name (registry on Windows, /proc/cpuinfo on Linux), cores, frequency, usage per core, load averages, process and thread counts (cached 30 s), boot time, uptime."],
@@ -552,40 +620,43 @@ def sec_modules():
             ["gpu(), power()", "functions", "gpu_info static and live data plus PCIe link, VBIOS, max clocks, power limits, throttle reasons and GPU processes from nvidia-smi; power draw against limit, Windows power plan, battery."],
             ["software(), app(), everything()", "functions", "Library and driver versions and the Docker flag; the app process; one call that collects all of the above."],
         ], [1.6, 0.6, 3.2]),
-        H2("5.5 upscaler.py (109 lines)", "s5-5"),
+        H2("5.9 upscaler.py (109 lines)", "s5-9"),
         table(["Name", "Kind", "Description"], [
             ["MODEL_PATH, TARGETS, TILE, OVERLAP", "constants", "models/RealESRGAN_x4plus.pth; 2k 2560, 4k 3840, uhd 3840, 8k 7680; 512 and 32 pixels."],
             ["Upscaler(device, model_path)", "class", "Loads the model with spandrel, switches it to half precision on CUDA, exposes name and scale."],
             ["Upscaler.upscale_once(img)", "method", "One x4 pass over padded tiles under inference_mode."],
             ["Upscaler.upscale_to(img, long_side)", "method", "Repeats passes until the long side reaches the target, resizing before a second pass, then Lanczos-resamples to exactly long_side. Returns (image, info)."],
         ], [1.6, 0.6, 3.2]),
-        H2("5.6 gpu_info.py (97 lines)", "s5-6"),
+        H2("5.10 gpu_info.py (97 lines)", "s5-10"),
         table(["Name", "Kind", "Description"], [
             ["snapshot()", "function", "Runs nvidia-smi once and returns temperature_c, power_w, power_limit_w, gpu_util_pct, mem_util_pct, mem_used_mb, mem_total_mb, sm_clock_mhz, mem_clock_mhz, fan_pct, driver_version, pstate. Returns {} if nvidia-smi fails."],
             ["static_info()", "function", "gpu_name, vram_total_gb, compute_capability, multiprocessors, cuda_version, cudnn_version, torch_version, diffusers_version, python_version, os."],
             ["torch_memory()", "function", "vram_allocated_gb, vram_reserved_gb, vram_peak_gb from the torch allocator."],
         ], [1.6, 0.6, 3.2]),
-        H2("5.7 db.py (188 lines)", "s5-7"),
+        H2("5.11 db.py (about 270 lines)", "s5-11"),
         table(["Name", "Kind", "Description"], [
             ["DB_PATH, SCHEMA, NEW_COLUMNS", "constants", "generations.db next to the module; CREATE TABLE plus index; columns added after the first release."],
             ["connect()", "function", "Opens a connection with Row factory, applies schema and migrations."],
             ["insert(record)", "function", "Inserts known keys as columns; unknown keys are packed into extra_json. Returns the row id."],
             ["update(row_id, fields)", "function", "New in v2.0: sets known columns on one row; used by the Upscale bar."],
-            ["fetch(limit, search), get(row_id), stats()", "functions", "Newest-first list with LIKE search; one record; aggregates."],
+            ["fetch(limit, search), fetch_filtered(limit, search, model_id, upscaled_only), get(row_id), stats()", "functions", "Newest-first list with LIKE search, the filtered variant used by History, one record, aggregates."],
+            ["delete(row_id, remove_files), stats_by_model(), recent_counts(), lora_usage(), models_used()", "functions", "New in v2.1: delete a record and optionally its files; per-model images, timings, VRAM and last use; images today, this week and GPU seconds in 24 h; LoRA use counts from the parser notes; distinct models for the History filter."],
         ], [1.6, 0.6, 3.2]),
-        H2("5.8 generate.py (121 lines)", "s5-8"),
+        H2("5.12 generate.py (125 lines)", "s5-12"),
         P("Standalone command-line generator. Arguments: prompt, --negative, --steps, --guidance, --width, --height, "
           "--seed, --count, --model (key, repo id or path), --lora NAME[:WEIGHT] (repeatable), --out, --list-models. "
           "Uses the same ModelManager, so weighting, samplers and LoRAs behave exactly as in the app. It does not "
           "write to the database."),
-        H2("5.9 Supporting files", "s5-9"),
+        H2("5.13 Supporting files", "s5-13"),
         table(["File", "Purpose"], [
             ["requirements.txt", "Python dependencies with the note on installing the CUDA PyTorch build first"],
             ["run-app.bat", "Double-click launcher that runs app.py inside the virtual environment"],
             ["README.md", "User-facing quick start, model table, prompt reference, Admin and Docker sections"],
             ["Dockerfile, docker-compose.yml, .dockerignore", "Container image and service definition (section 11)"],
             ["models/RealESRGAN_x4plus.pth", "Upscaler weights"],
-            ["models/checkpoints/, models/loras/", "Drop folders for user SDXL checkpoints and LoRAs"],
+            ["models/checkpoints/, models/loras/", "Checkpoints and LoRAs, filled by the Admin panel or by hand"],
+            ["models/registry.json", "Admin registry: settings, model overrides and additions, LoRA metadata (created on first edit, not in git)"],
+            ["outputs/.thumbs/", "Thumbnail cache for the History grid"],
             ["docs/", "This documentation set as PDFs"],
             ["docs-src/build_pdf.py, docs-src/images/", "Source of this documentation and its figures"],
         ], [1.6, 3.2]),
@@ -862,10 +933,59 @@ def sec_database():
 def sec_admin():
     return [
         H1("9. Admin Panel", "s9"),
-        P("The Admin tab is a live view of the machine running the studio. Every number is sampled on demand by "
-          "sysinfo.py; nothing is stored. A refresh costs about 0.7 s (3 s the first time, when folder sizes are "
-          "computed). The tab refreshes when opened, on the Refresh button, and every 5 s when auto-refresh is ticked."),
-        H2("9.1 Tiles", "s9-1"),
+        P("The Admin tab has two jobs: it manages the studio (models, LoRAs, downloads, settings) and it watches the "
+          "machine. Everything an admin changes is stored in models/registry.json; everything the panel measures is "
+          "sampled on demand and never stored. The eight sub-tabs:"),
+        table(["Sub-tab", "Purpose"], [
+            ["Overview", "System tiles (9.4), activity tiles (images today and this week, GPU minutes in the last 24 h, loaded and start-up model, models on disk, LoRAs, downloads, outputs size, Hugging Face login) and the per-model statistics table (images, average, fastest and slowest seconds, steps per second, average and maximum peak VRAM, hottest temperature, upscaled count, last use). Refreshes on open, on Refresh and every 5 s when ticked."],
+            ["Models", "Table of every model: key, name, family, type (built-in, local file, added), default steps and guidance, sampler, on disk, size, images, average seconds, enabled, start-up star. Selecting a row fills the editor (9.1)."],
+            ["LoRAs", "Table of every LoRA file: name, file, family, trigger words, weight, size, enabled, recorded uses, source. Selecting a row fills the editor (9.2)."],
+            ["Add", "Add a model or LoRA from a source (9.3)."],
+            ["Downloads", "Every background download with state, bytes, speed, remaining time and the last message; Cancel by number; Clear finished. Refreshes every 3 s."],
+            ["System", "The nine live tiles and six detail sections (9.4 and 9.5)."],
+            ["Settings", "Start-up model; default weight for LoRAs ticked in the LoRAs box; default negative prompt; VRAM release after each image on the big flow models; Hugging Face token (saved through huggingface_hub, with Check login); Civitai token; clean-up of generations and images older than N days; admin password lock."],
+            ["Logs", "The app's own log: last N lines with a contains filter, an errors-only level and 3 s auto-refresh."],
+        ], [0.9, 4.1]),
+        H2("9.1 Model editor and actions", "s9-1"),
+        table(["Field or button", "Effect"], [
+            ["Name, Description", "Shown in the Model box and the model cards."],
+            ["Family, Source", "Editable for added models only; built-ins and local files keep theirs."],
+            ["Default steps, Default guidance, Sampler, Weight variant", "The model's defaults; quality and fidelity words in prompts scale relative to them. Sampler choices: DPM++ 2M Karras, DPM++ SDE Karras, Euler a, Euler, model default."],
+            ["Aliases, Auto-pick for styles", "Extra words that name the model in a prompt; style names for which Auto chooses it when an SDXL-family model is loaded."],
+            ["Supports a negative prompt, Enabled", "Whether the negative box applies; whether the model is listed and usable."],
+            ["Save changes", "Writes the entry (overrides for a built-in, the full spec for an added model). Applies to the next load."],
+            ["Load now", "Loads the model immediately under the GPU lock, downloading first if needed."],
+            ["Download in background", "Queues a download job without loading."],
+            ["Set as start-up model", "The model loaded when the app starts."],
+            ["Unload current model", "Frees the VRAM; the next generation loads again."],
+            ["Remove from list / reset built-in", "Deletes an added model's entry (and unloads it if loaded) or resets a built-in to its defaults. Files stay."],
+            ["Delete files from disk", "With the confirmation ticked: removes the local file or the repo's Hugging Face cache folder and the converted caches under models/cache/."],
+        ], [1.6, 3.4]),
+        H2("9.2 LoRA editor and actions", "s9-2"),
+        table(["Field or button", "Effect"], [
+            ["Display name", "Shown in the LoRAs box; the prompt tag still uses the file name."],
+            ["Trained for (family)", "Auto switches to a model of this family when the LoRA is requested; on a model of another family the LoRA is skipped with a note rather than loaded."],
+            ["Trigger words", "Shown in the LoRAs box and reminded in the \"Will generate\" line when missing from the prompt. Civitai sources fill them automatically."],
+            ["Default weight", "Used when the LoRA is ticked in the LoRAs box; a prompt tag such as <lora:name:1.2> overrides it."],
+            ["Description, Source, Tags, Enabled", "Notes; where it came from; free tags; whether it is listed."],
+            ["Try it in the Studio", "Fills the prompt with the trigger words, the LoRA tag, a matching model and a fixed seed, and switches to the Studio tab."],
+            ["Delete LoRA file", "With the confirmation ticked: deletes the file and its metadata; if the adapter is inside the loaded pipeline the model is unloaded so the next load is clean."],
+        ], [1.6, 3.4]),
+        H2("9.3 Sources the Add tab understands", "s9-3"),
+        table(["Source", "Example", "What happens"], [
+            ["Hugging Face repo, diffusers layout", "RunDiffusion/Juggernaut-XL-v9", "model_index.json names the pipeline class; StableDiffusionXLPipeline, ZImagePipeline, QwenImagePipeline and FluxPipeline map to the four families. The fp16 variant is used for SDXL when present. Added as a model; download of the needed weights only (about 6.9 of 13.1 GB for Juggernaut)."],
+            ["Hugging Face repo of single files", "ostris/crayon_style_lora_sdxl", "The largest .safetensors file is selected (others selectable); under 1.5 GB it is treated as a LoRA, above as a checkpoint."],
+            ["Hugging Face file", "nerijs/pixel-art-xl/pixel-art-xl.safetensors or its https link", "That file; the stored Hugging Face token is sent for gated repos."],
+            ["Civitai", "https://civitai.com/models/133005?modelVersionId=782002, a model-versions link or an api/download link", "The Civitai API supplies type (Checkpoint or LoRA), base model (SDXL 1.0, Pony, Illustrious, FLUX.1 ...), trigger words, file name and size and the NSFW flag; the Civitai token from Settings is used when present."],
+            ["Direct URL", "https://example.com/model.safetensors", "HEAD request for name and size; type guessed from the size."],
+            ["Local path", "D:\\downloads\\model.safetensors", "Copied into models/."],
+            ["Upload", "a file chosen in the browser", "Moved into models/ (suited to LoRAs; the limit is 8 GB)."],
+        ], [1.2, 1.7, 2.1]),
+        P("Single files are always loaded with the SDXL single-file loader, so FLUX, Qwen-Image and Z-Image additions "
+          "must be diffusers repos. File downloads resume after an interruption (the .part file is kept) and refuse "
+          "answers that are web pages, which is what a missing token looks like. Registration happens when the file "
+          "has arrived, so an interrupted download leaves nothing half-registered."),
+        H2("9.4 System tiles", "s9-4"),
         table(["Tile", "Value", "Meter or state", "Source"], [
             ["GPU load", "utilisation %, SM clock, P-state", "meter", "nvidia-smi"],
             ["VRAM used", "GiB used of total; torch allocation", "meter of used %", "nvidia-smi, torch"],
@@ -879,7 +999,7 @@ def sec_admin():
         ], [0.9, 1.6, 1.6, 0.9]),
         P("Meters use the pink accent and switch to the amber warning colour above 85 % and the red critical colour "
           "above 95 %. The temperature state always carries an icon and a word, never a colour alone."),
-        H2("9.2 Sections", "s9-2"),
+        H2("9.5 System sections", "s9-5"),
         table(["Section", "Fields"], [
             ["GPU", "Card, VRAM, compute capability and SM count; driver, CUDA, cuDNN; current and maximum SM and memory clocks; GPU and memory-bus utilisation; VRAM from nvidia-smi and from torch (allocated, reserved, session peak); PCIe generation and width; throttle reasons decoded from the nvidia-smi bitmask (idle, power cap, thermal slowdown and so on); VBIOS and PCI bus; loaded model and sampler; processes on the GPU."],
             ["CPU", "Processor name, architecture, physical and logical cores, current and maximum frequency, total and per-core usage, 1/5/15-minute load averages, process and thread counts, boot time and uptime."],
@@ -888,14 +1008,20 @@ def sec_admin():
             ["Power", "GPU draw against the configured limit with percentage; default and maximum limits; performance state and fan; the active Windows power plan; battery if present; estimated GPU energy of all recorded generations in Wh."],
             ["Software and app", "OS, Python, torch, CUDA, cuDNN, diffusers, transformers, gradio versions; whether the process runs in Docker; app PID, start time, uptime, resident memory and threads; working directory; generation totals from the database."],
         ], [1, 4]),
-        H2("9.3 Reading the numbers", "s9-3"),
+        H2("9.6 Reading the numbers", "s9-6"),
         bullets([
             "Idle readings on the RTX 3090 are about 45 W, P8, SM clock 210 MHz, PCIe gen 1 x1 and throttle reason \"GPU idle\". Under load expect P0, 1.7 to 1.9 GHz, PCIe gen 3 or 4 x16 and 350 to 390 W.",
             "nvidia-smi reports allocator reservation as used VRAM; the torch allocated figure is the live tensor total.",
             "Process names on the GPU may show \"Insufficient Permissions\" for processes of other users or the system.",
             "The network rate tiles show 0 on the first sample after start; every later refresh shows the rate since the previous one.",
             "Inside Docker the CPU, memory and network sections describe the container, while GPU and power come from the host driver.",
+            "A System or Overview refresh costs about 0.7 s (3 s the first time, when folder sizes are computed) and runs on its own queue, so it keeps working while an image is generating.",
         ]),
+        H2("9.7 Locking the panel", "s9-7"),
+        P("Deleting model or LoRA files and cleaning outputs always need their confirmation box. When the environment "
+          "variable FRAZILE_ADMIN_PASSWORD is set, those actions also need the panel unlocked once per browser session "
+          "with that password in Settings. Set it whenever the server is reachable from other machines (Docker, or "
+          "GRADIO_SERVER_NAME=0.0.0.0); on localhost it is optional."),
     ]
 
 
@@ -1078,7 +1204,9 @@ def sec_operations():
         bullets([
             "The server listens on localhost only by default and has no authentication. The Docker image binds all interfaces inside the container; the compose file publishes the port on the host, so treat that like a LAN exposure.",
             "No telemetry or prompts are sent anywhere. Network access is limited to model downloads from Hugging Face and the optional reachability check in the Admin panel, which only opens a TCP connection.",
-            "The Admin panel reveals hostnames, IP addresses, MAC addresses, listening ports and process names. Anyone who can reach the page can read them.",
+            "The Admin panel reveals hostnames, IP addresses, MAC addresses, listening ports and process names, and can delete files, store tokens and download models. Anyone who can reach the page can use it; set FRAZILE_ADMIN_PASSWORD when the page is reachable beyond localhost.",
+            "Tokens: the Hugging Face token is stored by huggingface_hub in the user profile; the Civitai token is stored in models/registry.json, which is excluded from git.",
+            "Models and LoRAs downloaded from Civitai or arbitrary URLs are third-party files; only .safetensors files are accepted because the format cannot execute code when loaded.",
             "Prompts are stored verbatim in generations.db. Treat the file with the same care as the images.",
         ]),
     ]
@@ -1138,7 +1266,19 @@ def sec_changelog():
             "Fixed: VRAM paging on the second image (VAE tiling, cache release, expandable segments); FLUX gated-repo error now reported clearly.",
         ]),
         H3("Documentation 2.0 (22 Oct 2026)"),
-        bullets(["This document set, rebuilt from docs-src/build_pdf.py with three new sections (Models, Admin panel, Deployment) and a model comparison figure."]),
+        bullets(["Document set rebuilt from docs-src/build_pdf.py with three new sections (Models, Admin panel, Deployment) and a model comparison figure."]),
+        H3("Increment 11: model and LoRA management, Studio and History upgrades (22 Oct 2026)"),
+        bullets([
+            "registry.py: models/registry.json with settings, overrides of built-in models, admin-added models and LoRA metadata (family, trigger words, default weight, source, enabled). models.py merges it into all_models(), family_models(), find_lora() and lora_info(); apply_loras() refuses LoRAs of another family.",
+            "downloads.py: inspect_source() for Hugging Face repos and files, Civitai links, direct URLs and local paths; JobManager with a two-worker pool, byte progress, speed, ETA, resume and cancel; snapshot downloads with per-family ignore patterns; delete_model_files().",
+            "admin_ui.py: the Admin tab rebuilt with Overview, Models, LoRAs, Add, Downloads, System, Settings and Logs; model and LoRA editors; load, unload, download, start-up, remove and delete actions; Hugging Face and Civitai tokens; clean-up; admin password lock. applog.py keeps the app's output for the Logs tab.",
+            "Studio: quick-hint chips, live header pills (loaded model, VRAM, temperature, load, downloads), LoRA trigger-word reminders and family notes in the interpretation line, model cards, empty state, Reuse this seed and New variation; dropdowns refresh when the tab is opened so Admin additions appear without a restart.",
+            "History: model and upscaled-only filters, a thumbnail grid backed by a 384 px JPEG cache (outputs/.thumbs/), Reuse prompt with or without seed, delete with optional file removal. db.py gained delete(), stats_by_model(), recent_counts(), lora_usage(), models_used() and fetch_filtered().",
+            "Concurrency: ModelManager.lock plus the \"gpu\" and \"stats\" queue ids, so telemetry refreshes while an image is generating.",
+            "Verified through the Gradio API: chips, preview, overview and system refresh, source inspection, LoRA edit, a LoRA generation that routed Auto from Z-Image to Juggernaut (6.8 s at 1024x1024, 15 steps), history with 18 thumbnails, a 46 MB LoRA (ostris/crayon_style_lora_sdxl) added through the Add flow with a background download, trigger words recorded and used in a generation, and a diffusers test repo registered, fetched and deleted again from the Models tab.",
+        ]),
+        H3("Documentation 2.1 (22 Oct 2026)"),
+        bullets(["This document set: Admin panel section rewritten around management, module reference for the six new modules, requirements FR-21 to FR-25 and NFR-11 to NFR-12, workflows for adding and managing models."]),
         H2("13.2 Roadmap", "s13-2"),
         table(["Priority", "Item", "Notes"], [
             ["High", "Image-to-image and inpainting", "Same pipeline family; lets a chosen image be edited rather than regenerated; the ModelManager already shares components"],
@@ -1147,8 +1287,8 @@ def sec_changelog():
             ["Medium", "FLUX.1 dev and ControlNet", "dev is gated and non-commercial; ControlNet gives pose and depth control"],
             ["Medium", "SDXL refiner or hires-fix pass", "Adds generated detail at 2x before Real-ESRGAN"],
             ["Medium", "Export history to CSV and chart timings per model", "pandas is already present"],
-            ["Medium", "Thumbnail cache for the History grid", "Avoids loading full PNGs when browsing"],
-            ["Low", "Authentication", "Gradio supports basic auth; needed before exposing beyond localhost or publishing the container port"],
+            ["Medium", "Image-to-image from a History entry", "The History tab already has the record and the reuse actions"],
+            ["Low", "Full authentication", "Gradio supports basic auth for the whole app; the admin password covers destructive actions only"],
             ["Low", "Cloud deployment profile", "The Docker image is the starting point for RunPod or a Hugging Face Space"],
         ], [0.7, 2, 2.3]),
     ]
@@ -1159,7 +1299,13 @@ def sec_appendix():
         H1("Appendix", "sA"),
         H2("A. Project file tree", "sA-1"),
         code("ai-image-gen/\n"
-             "  app.py                 web application (Gradio), theme, Admin panel\n"
+             "  app.py                 web application: Studio and History tabs, generation\n"
+             "  admin_ui.py            Admin panel: models, LoRAs, add, downloads, system, settings, logs\n"
+             "  registry.py            models/registry.json: settings, model overrides, LoRA metadata\n"
+             "  downloads.py           source inspection and background downloads\n"
+             "  ui_theme.py            colours, Gradio theme, CSS\n"
+             "  ui_common.py           shared UI helpers (choices, header, cards, tiles)\n"
+             "  applog.py              in-memory log for the Logs tab\n"
              "  models.py              model registry, ModelManager, LoRAs, compel\n"
              "  prompt_parser.py       prompt -> settings\n"
              "  sysinfo.py             system telemetry for the Admin panel\n"
@@ -1174,10 +1320,12 @@ def sec_appendix():
              "  generations.db         created on first generation\n"
              "  models/\n"
              "    RealESRGAN_x4plus.pth\n"
-             "    cache/               bf16 copies of converted models (auto-built, 12 GB for Z-Image)\n"
-             "    checkpoints/         your SDXL .safetensors files\n"
-             "    loras/               your SDXL LoRA files\n"
+             "    registry.json        Admin registry (created on first edit)\n"
+             "    cache/               bf16 / NF4 copies of converted models (auto-built)\n"
+             "    checkpoints/         SDXL .safetensors checkpoints (Admin › Add or by hand)\n"
+             "    loras/               LoRA files (Admin › Add or by hand)\n"
              "  outputs/               generated PNG files\n"
+             "    .thumbs/             History thumbnails\n"
              "  docs/                  this documentation set as PDFs\n"
              "  docs-src/\n"
              "    build_pdf.py         source of the documentation\n"
@@ -1196,6 +1344,9 @@ def sec_appendix():
             ["List history / one record / statistics", "db.py  |  db.py 4  |  db.py stats"],
             ["Parser self-test", "prompt_parser.py"],
             ["Model registry status", "models.py"],
+            ["Print the Admin registry", "registry.py"],
+            ["Inspect a model or LoRA source", "downloads.py owner/repo"],
+            ["Start without loading a model", "set FRAZILE_STARTUP_MODEL=none, then app.py"],
             ["Fetch the starter LoRAs", "models.py fetch-loras"],
             ["GPU telemetry dump", "gpu_info.py"],
             ["Full system telemetry as JSON", "sysinfo.py"],
@@ -1207,10 +1358,13 @@ def sec_appendix():
         H2("D. Programmatic access to the running app", "sA-4"),
         code("from gradio_client import Client\n"
              "c = Client(\"http://127.0.0.1:7860\")\n"
-             "images, report, records, sel, bar, hint, loaded = c.predict(\n"
-             "    \"a lighthouse, 16:9, seed 42\", \"\", \"juggernaut\", api_name=\"/generate\")\n"
-             "table, stats = c.predict(\"lighthouse\", 50, api_name=\"/refresh_history\")\n"
-             "tiles, gpu, cpu, mem, net, power, soft = c.predict(False, api_name=\"/admin_refresh\")"),
+             "images, report, records, sel, bar, hint, loaded, empty = c.predict(\n"
+             "    \"a lighthouse, 16:9, seed 42\", \"\", \"juggernaut\", [], api_name=\"/generate\")\n"
+             "table, thumbs, stats, models = c.predict(\"lighthouse\", 50, \"\", False, api_name=\"/refresh_history\")\n"
+             "tiles, gpu, cpu, mem, net, power, soft = c.predict(False, api_name=\"/system_refresh\")\n"
+             "tiles, activity, per_model = c.predict(api_name=\"/overview_refresh\")\n"
+             "info, html, *form = c.predict(\"ostris/crayon_style_lora_sdxl\", api_name=\"/check_source\")\n"
+             "log = c.predict(200, \"LoRA\", \"all\", api_name=\"/logs_text\")"),
         H2("E. Licences", "sA-5"),
         table(["Component", "Licence"], [
             ["Stable Diffusion XL base 1.0", "CreativeML Open RAIL++-M"],

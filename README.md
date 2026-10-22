@@ -1,7 +1,9 @@
 # Frazile AI - AI Image Generation (local GPU)
 
-Runs Z-Image Turbo, Stable Diffusion XL, its best community fine-tunes and FLUX.1 on your NVIDIA GPU using
-Hugging Face `diffusers`, with prompt weighting, LoRAs and Real-ESRGAN upscaling.
+Runs Z-Image Turbo, Stable Diffusion XL and its best community fine-tunes, Qwen-Image and FLUX.1 on your
+NVIDIA GPU using Hugging Face `diffusers`, with prompt weighting, LoRAs and Real-ESRGAN upscaling. A web
+Studio drives everything from the prompt; an Admin panel manages models, LoRAs, downloads and shows live
+system statistics.
 
 **Project owner:** Frazile AI  
 **Author:** Frazile AI
@@ -55,16 +57,26 @@ When an SDXL-family model is loaded it picks a specialist from the style words o
 Playground, `digital art`/`comic`/`cyberpunk` -> DreamShaper. Otherwise it keeps the model that is
 already loaded. Switching between SDXL models takes about 26 s; Z-Image takes longer.
 
-**Your own checkpoints:** drop any SDXL `.safetensors` file (Civitai downloads, merges, your own
-fine-tunes) into `models\checkpoints\`. It appears in the model list under its file name after a
-restart. Files with `turbo`, `lightning` or `hyper` in the name get 6-step defaults.
+**Adding models:** open **Admin › Add**, paste a Hugging Face repo id (`RunDiffusion/Juggernaut-XL-v9`),
+a file in a repo, a Civitai link, a direct `.safetensors` URL or a local path, press **Check** and then
+**Add**. Diffusers repos become models in their own right (SDXL, Z-Image, Qwen-Image or FLUX family is
+detected from the repo); single files are downloaded into `models\checkpoints\` and loaded with the
+SDXL loader. Downloads run in the background (Admin › Downloads) and the model appears in the Model box
+as soon as it finishes, no restart needed. You can still drop SDXL `.safetensors` files straight into
+`models\checkpoints\` by hand; files with `turbo`, `lightning` or `hyper` in the name get 6-step defaults.
+
+Every model, built-in or added, can be edited in **Admin › Models**: default steps and guidance, sampler,
+description, aliases, the style words that auto-pick it, enabled or hidden, and which model loads at start.
+Edits live in `models\registry.json` and apply to the next load.
 
 **LoRAs:** two starter SDXL LoRAs are set up in `models\loras\` (fetch them on a fresh clone with
 `.\.venv\Scripts\python.exe models.py fetch-loras`): **Pixel Art XL** (`<lora:pixel-art-xl>`,
 say "pixel art" in the prompt) and **Papercut** (`<lora:papercut>`, say "papercut"). Tick them in the
-LoRAs box (applied at 0.8) or write the tag in the prompt with any weight, for example
-`<lora:pixel-art-xl:0.9>`. Several can be stacked. Add more by dropping `.safetensors` files into the
-folder and restarting. They apply to SDXL-family models; Z-Image and FLUX need LoRAs trained for them.
+LoRAs box or write the tag in the prompt with any weight, for example `<lora:pixel-art-xl:0.9>`. Several
+can be stacked. Add more in **Admin › Add** (Civitai links bring their trigger words along) or by dropping
+`.safetensors` files into the folder. **Admin › LoRAs** records, per file, the model family it was trained
+for, its trigger words and its default weight: Auto then switches to a model of that family, the Studio
+reminds you of the trigger words, and a LoRA is never applied to a model of the wrong family.
 
 **Prompt weighting (SDXL family):** `(glowing sword:1.3)` or `(glowing sword)++` emphasises,
 `(word:0.7)` or `(word)--` de-emphasises. Prompts longer than 77 tokens are no longer cut off.
@@ -93,9 +105,12 @@ requirements.txt). FLUX has no negative prompt and ignores LoRAs here.
 ```
 
 Opens http://127.0.0.1:7860 in a full-width, dark Frazile AI studio layout. Write everything in the
-prompt; the only control is the Model box, and even that can be overridden from the prompt.
-After a generation an **Upscale** bar appears: pick 2K / 4K / 8K and upscale the selected image
-or the whole batch with Real-ESRGAN.
+prompt; the quick-hint chips above it add or remove the common hints (aspect ratio, 2K/4K/8K, image
+count, quick / highly detailed, styles, a random seed) and the Model and LoRAs boxes can be overridden
+from the prompt. The header shows the loaded model, VRAM, GPU temperature and running downloads live.
+After a generation an **Upscale** bar appears: pick 2K / 4K / 8K and upscale the selected image or the
+whole batch with Real-ESRGAN; **Reuse this seed** puts the selected image's seed into the prompt and
+**New variation** runs the prompt again with a fresh seed.
 
 | Want | Say in the prompt |
 |---|---|
@@ -120,7 +135,32 @@ Every result is also saved to `outputs\`.
 
 ## Admin panel
 
-The **Admin** tab is a live system panel. Tiles at the top show GPU load, VRAM, GPU temperature
+The **Admin** tab manages the studio and watches the machine. Its sub-tabs:
+
+- **Overview:** the system tiles (below), activity tiles (images today and this week, GPU minutes in the
+  last 24 h, loaded and start-up model, models on disk, LoRAs, downloads, outputs size, Hugging Face
+  login) and a per-model table of images, average / fastest / slowest seconds, steps per second, VRAM and
+  temperature.
+- **Models:** every model with family, type (built-in, local file, added), defaults, sampler, on-disk size,
+  usage and enabled / start-up flags. Click one to edit it, **Load now**, **Download in background**,
+  **Set as start-up model**, unload the current model to free VRAM, remove it from the list (or reset a
+  built-in to its defaults) or delete its files from disk.
+- **LoRAs:** every LoRA file with family, trigger words, default weight, size and recorded uses; edit the
+  metadata, **Try it in the Studio** (fills a test prompt and switches tabs) or delete the file.
+- **Add:** add a model or LoRA from a Hugging Face repo or file, a Civitai link, a direct URL, a local
+  path or a browser upload. **Check** shows what the source is (pipeline class, family, size, gated,
+  trigger words) and pre-fills the form.
+- **Downloads:** progress, speed and ETA of background downloads, with cancel.
+- **System:** the full telemetry described below.
+- **Settings:** start-up model, default LoRA weight, default negative prompt, Hugging Face token (for
+  FLUX and gated repos), Civitai token, clean-up of old generations, and the admin lock.
+- **Logs:** the app's own log (model loads, generations, downloads, errors) with filter and auto-refresh.
+
+Deleting files and cleaning outputs need their confirmation box ticked. When the app is reachable from
+other machines (Docker or `GRADIO_SERVER_NAME=0.0.0.0`) set `FRAZILE_ADMIN_PASSWORD`; destructive
+actions then also need the panel unlocked in Settings.
+
+The **System** sub-tab is the live system panel. Tiles at the top show GPU load, VRAM, GPU temperature
 (with an OK / Warm / Hot / Critical state), GPU power against its limit, CPU usage with a
 per-core bar strip, memory, system-disk space, network throughput and app uptime. Below them:
 
@@ -139,6 +179,7 @@ per-core bar strip, memory, system-disk space, network throughput and app uptime
   generation totals from the database.
 
 Refresh by hand or tick **Auto-refresh every 5 s**. The panel is also available in the container.
+Stats refresh while an image is generating: telemetry and GPU work run on separate queues.
 
 ## Docker
 
@@ -148,10 +189,11 @@ The whole app can run as a GPU container.
 docker compose up --build
 ```
 
-Then open http://localhost:7860. Generated images land in `outputs\`, your checkpoints and
-LoRAs are read from `models\`, the history database is `generations.db`, and downloaded models
-go to a named volume (`hf-cache`) so rebuilds do not re-download them. Set `HF_TOKEN` in the
-environment (or a `.env` file) if you want FLUX to download inside the container.
+Then open http://localhost:7860. Generated images land in `outputs\`, your checkpoints, LoRAs and
+the Admin registry are read from `models\`, the history database is `generations.db`, and downloaded
+models go to a named volume (`hf-cache`) so rebuilds do not re-download them. Set `HF_TOKEN` in the
+environment (or a `.env` file) if you want FLUX to download inside the container, and
+`FRAZILE_ADMIN_PASSWORD` to lock destructive Admin actions, since the container listens on all interfaces.
 
 Requirements on the host:
 
@@ -171,8 +213,9 @@ clock speeds, fan, driver and library versions, and the exact prompt sent to the
 
 Every image is also recorded in `generations.db` (SQLite). Browse it two ways:
 
-- **History tab** in the app: search prompts, see totals and averages, click a row to view
-  the image with its full details.
+- **History tab** in the app: search prompts, filter by model or upscaled-only, browse a table or a
+  thumbnail grid, click an entry to view the image with its full details, **Reuse prompt** (with or
+  without the seed) to send it back to the Studio, or delete the record and its files.
 - **Command line:**
 
 ```powershell
@@ -206,7 +249,9 @@ Upscale any existing image from the command line:
 
 Full technical documentation is in `docs\` as PDFs:
 
-- `00-AI-Image-Generator-Complete-Technical-Documentation.pdf` is the complete document (29 pages).
-- `01-Project-Overview.pdf` to `11-Appendix.pdf` are the same sections as standalone PDFs
-  (requirements, architecture, workflows, module reference, prompt language, database schema,
-  performance, operations, change log, appendix).
+- `00-AI-Image-Generator-Complete-Technical-Documentation.pdf` is the complete document.
+- `01-Project-Overview.pdf` to `14-Appendix.pdf` are the same sections as standalone PDFs
+  (requirements, architecture, workflows, module reference, models, prompt language, database schema,
+  admin panel, performance, deployment, operations, change log, appendix).
+
+Rebuild them after a change with `.\.venv\Scripts\python.exe docs-src\build_pdf.py`.

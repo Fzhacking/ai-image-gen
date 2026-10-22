@@ -166,6 +166,85 @@ def stats() -> dict[str, Any]:
         return dict(r)
 
 
+def delete(row_id: int, remove_files: bool = False) -> list[str]:
+    """Delete one generation record and optionally its image files. Returns the files removed."""
+    removed: list[str] = []
+    rec = get(row_id)
+    if not rec:
+        return removed
+    if remove_files:
+        for key in ("image_path", "upscaled_path"):
+            path = rec.get(key)
+            if path and Path(path).exists():
+                try:
+                    Path(path).unlink()
+                    removed.append(path)
+                except OSError:
+                    pass
+    with connect() as con:
+        con.execute("DELETE FROM generations WHERE id = ?", (row_id,))
+    return removed
+
+
+def stats_by_model() -> list[dict[str, Any]]:
+    """Per-model totals: images, mean/min/max inference seconds, mean steps/s, mean and max peak VRAM, last use."""
+    with connect() as con:
+        rows = con.execute(
+            "SELECT model_id, COUNT(*) AS images, "
+            "ROUND(AVG(inference_seconds), 2) AS avg_seconds, ROUND(MIN(inference_seconds), 2) AS min_seconds, "
+            "ROUND(MAX(inference_seconds), 2) AS max_seconds, ROUND(AVG(steps_per_second), 2) AS avg_steps_per_second, "
+            "ROUND(AVG(vram_peak_gb), 2) AS avg_vram_peak_gb, ROUND(MAX(vram_peak_gb), 2) AS max_vram_peak_gb, "
+            "ROUND(MAX(temp_after_c), 0) AS max_temp_c, ROUND(SUM(total_seconds), 1) AS total_seconds, "
+            "SUM(CASE WHEN upscaled_path IS NOT NULL THEN 1 ELSE 0 END) AS upscaled, MAX(created_at) AS last_used "
+            "FROM generations GROUP BY model_id ORDER BY images DESC"
+        )
+        return [dict(r) for r in rows]
+
+
+def recent_counts() -> dict[str, Any]:
+    """Images generated today, in the last 7 days, and the last 24 h of GPU seconds."""
+    with connect() as con:
+        r = con.execute(
+            "SELECT "
+            "SUM(CASE WHEN created_at >= date('now', 'localtime') THEN 1 ELSE 0 END) AS today, "
+            "SUM(CASE WHEN created_at >= datetime('now', 'localtime', '-7 days') THEN 1 ELSE 0 END) AS week, "
+            "ROUND(SUM(CASE WHEN created_at >= datetime('now', 'localtime', '-1 day') THEN total_seconds ELSE 0 END), 1) AS gpu_seconds_24h, "
+            "COUNT(*) AS total FROM generations"
+        ).fetchone()
+        return {k: (v or 0) for k, v in dict(r).items()}
+
+
+def lora_usage() -> dict[str, int]:
+    """How many recorded images used each LoRA (from the parser notes 'LoRA <name> x<w>')."""
+    import re
+    counts: dict[str, int] = {}
+    with connect() as con:
+        for (notes,) in con.execute("SELECT parser_notes FROM generations WHERE parser_notes LIKE '%LoRA %'"):
+            for name in re.findall(r"LoRA ([^ ·]+) x[-\d.]+", notes or ""):
+                counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def models_used() -> list[str]:
+    with connect() as con:
+        return [r[0] for r in con.execute("SELECT DISTINCT model_id FROM generations WHERE model_id IS NOT NULL ORDER BY model_id")]
+
+
+def fetch_filtered(limit: int = 50, search: str = "", model_id: str | None = None, upscaled_only: bool = False) -> list[dict[str, Any]]:
+    where, args = [], []
+    if search:
+        where.append("(user_prompt LIKE ? OR final_prompt LIKE ?)")
+        args += [f"%{search}%", f"%{search}%"]
+    if model_id:
+        where.append("model_id = ?")
+        args.append(model_id)
+    if upscaled_only:
+        where.append("upscaled_path IS NOT NULL")
+    sql = "SELECT * FROM generations" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT ?"
+    with connect() as con:
+        return [dict(r) for r in con.execute(sql, [*args, limit])]
+
+
 def _print_row(r: dict[str, Any]) -> None:
     for k, v in r.items():
         if v is not None:

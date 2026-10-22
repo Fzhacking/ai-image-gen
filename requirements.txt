@@ -16,3 +16,4 @@ compel>=2.0            # prompt weighting (word:1.3) and long prompts for SDXL m
 sentencepiece          # T5 tokenizer for FLUX
 protobuf               # T5 tokenizer for FLUX
 bitsandbytes>=0.45     # 4-bit FLUX on 24 GB cards
+requests               # Admin panel downloads (Civitai, direct URLs)
