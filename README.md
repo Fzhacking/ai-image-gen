@@ -1,6 +1,7 @@
 # Frazile AI - AI Image Generation (local GPU)
 
-Runs Stable Diffusion XL on your NVIDIA GPU using Hugging Face `diffusers`.
+Runs Stable Diffusion XL, its best community fine-tunes and FLUX.1 on your NVIDIA GPU using
+Hugging Face `diffusers`, with prompt weighting, LoRAs and Real-ESRGAN upscaling.
 
 **Project owner:** Frazile AI  
 **Author:** Frazile AI
@@ -11,7 +12,7 @@ Runs Stable Diffusion XL on your NVIDIA GPU using Hugging Face `diffusers`.
 cd C:\Users\frazi\Documents\apps\ai-image-gen
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install torch --index-url https://download.pytorch.org/whl/cu126
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 pip install -r requirements.txt
 ```
 
@@ -21,16 +22,51 @@ pip install -r requirements.txt
 .\.venv\Scripts\Activate.ps1
 python generate.py "a cozy cabin in a snowy forest at dusk, cinematic lighting"
 python generate.py "a red sports car" --steps 40 --seed 42 --count 4
+python generate.py "portrait of a fisherman, (weathered skin:1.2)" --model juggernaut
+python generate.py --list-models
 python generate.py --help
 ```
 
-Images are saved to `outputs\`. The first run downloads the model (~7 GB) to
+Images are saved to `outputs\`. The first use of a model downloads it (~7 GB each) to
 `%USERPROFILE%\.cache\huggingface`.
 
-## Other models
+## Models
 
-Pass `--model` with any SDXL-compatible Hugging Face id, e.g.
-`--model stabilityai/sdxl-turbo --steps 4 --guidance 0`.
+| Say in the prompt | Model | Steps | CFG | Best for |
+|---|---|---|---|---|
+| `model sdxl` | SDXL base 1.0 | 30 | 7 | general purpose baseline |
+| `model juggernaut` | Juggernaut XL v9 | 30 | 5 | photoreal people, products and scenes; best all-round upgrade |
+| `model realvis` | RealVisXL V5.0 | 30 | 4 | photoreal with strong skin, fabric and lighting detail |
+| `model dreamshaper` | DreamShaper XL v2 Turbo | 6 | 2 | fast illustration, fantasy and stylised art |
+| `model playground` | Playground v2.5 | 40 | 3 | highly aesthetic, painterly-real composition and colour |
+| `model animagine` | Animagine XL 3.1 | 28 | 6 | anime and manga |
+| `model flux` | FLUX.1 [schnell] | 4 | 0 | best prompt understanding: text, counting, complex scenes |
+
+Steps and CFG are the model's defaults; `quick`, `highly detailed`, `strict`, `creative`,
+`30 steps` and `cfg 8` still adjust them. Every SDXL-family model runs with the DPM++ 2M Karras
+sampler (DPM++ SDE Karras for the turbo and RealVis models, Euler a for Animagine), which gives
+cleaner results than the stock sampler at the same step count.
+
+**Auto** (the default in the Model box) picks a model from the style words in the prompt once it
+is on disk: `photorealistic`/`cinematic` -> Juggernaut, `anime` -> Animagine, `oil painting` /
+`watercolor` -> Playground, `digital art`/`comic`/`cyberpunk` -> DreamShaper. Otherwise it keeps
+the model that is already loaded. Switching models takes about 15 s.
+
+**Your own checkpoints:** drop any SDXL `.safetensors` file (Civitai downloads, merges, your own
+fine-tunes) into `models\checkpoints\`. It appears in the model list under its file name after a
+restart. Files with `turbo`, `lightning` or `hyper` in the name get 6-step defaults.
+
+**LoRAs:** put SDXL LoRA files in `models\loras\` and reference them in the prompt the usual way:
+`<lora:name:0.8>` (weight optional). Several can be stacked.
+
+**Prompt weighting (SDXL family):** `(glowing sword:1.3)` or `(glowing sword)++` emphasises,
+`(word:0.7)` or `(word)--` de-emphasises. Prompts longer than 77 tokens are no longer cut off.
+
+**FLUX.1 [schnell]** is gated on Hugging Face. Accept the terms at
+https://huggingface.co/black-forest-labs/FLUX.1-schnell, run `.venv\Scripts\huggingface-cli login`,
+then say `model flux`. The download is about 33 GB. On a 24 GB card the transformer is loaded in
+4-bit and the T5 encoder in 8-bit with CPU offload, which needs `bitsandbytes` (in
+requirements.txt). FLUX has no negative prompt and ignores LoRAs here.
 
 ## Web UI (recommended)
 
@@ -38,10 +74,14 @@ Pass `--model` with any SDXL-compatible Hugging Face id, e.g.
 .\.venv\Scripts\python.exe app.py
 ```
 
-Opens http://127.0.0.1:7860. There are no sliders or dropdowns: write everything in the prompt.
+Opens http://127.0.0.1:7860. Write everything in the prompt; the only control is the Model box,
+and even that can be overridden from the prompt.
 
 | Want | Say in the prompt |
 |---|---|
+| A specific model | `model juggernaut`, `model: flux`, `using realvis` |
+| Emphasis | `(glowing sword:1.3)`, `(word)++`, `(word)--` |
+| LoRA | `<lora:name:0.8>` |
 | Aspect ratio | `16:9`, `9:16`, `4:3`, `3:2`, `1:1`, `21:9` |
 | Exact size | `1920x1080`, `1024x768` (scaled to the nearest GPU-friendly size) |
 | Orientation | `portrait`, `landscape`, `square`, `wide`, `tall`, `wallpaper`, `phone wallpaper`, `poster`, `banner` |

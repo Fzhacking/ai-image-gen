@@ -1,12 +1,16 @@
 """
-AI image generation on a local NVIDIA GPU using Stable Diffusion XL (diffusers).
+AI image generation on a local NVIDIA GPU (diffusers), command-line version.
 
 Usage:
     python generate.py "a cozy cabin in a snowy forest at dusk, cinematic lighting"
     python generate.py "a red sports car" --steps 40 --width 1024 --height 768 --seed 42
     python generate.py "an astronaut riding a horse" --negative "blurry, low quality" --count 4
+    python generate.py "portrait of a fisherman, (weathered skin:1.2)" --model juggernaut
+    python generate.py "cat astronaut" --model dreamshaper --lora pixel-style:0.7
+    python generate.py --list-models
 
-The first run downloads the model (~7 GB) into the Hugging Face cache.
+Models are named by key (see --list-models), Hugging Face repo id, or a local .safetensors path.
+The first use of a model downloads it into the Hugging Face cache.
 """
 
 import argparse
@@ -15,30 +19,32 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import torch
-from diffusers import StableDiffusionXLPipeline
+import models
 
-MODEL_ID = "stabilityai/stable-diffusion-xl-base-1.0"
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Generate images with Stable Diffusion XL on your GPU.")
-    p.add_argument("prompt", help="Text description of the image to generate")
+    p = argparse.ArgumentParser(description="Generate images on your GPU.")
+    p.add_argument("prompt", nargs="?", help="Text description of the image to generate")
     p.add_argument("--negative", default="blurry, low quality, deformed, watermark, text",
-                   help="Things to avoid in the image")
-    p.add_argument("--steps", type=int, default=30, help="Denoising steps (20-50; more = slower, often better)")
-    p.add_argument("--guidance", type=float, default=7.0, help="How strongly to follow the prompt (5-9 typical)")
+                   help="Things to avoid in the image (ignored by FLUX)")
+    p.add_argument("--steps", type=int, default=None, help="Denoising steps (default: the model's own)")
+    p.add_argument("--guidance", type=float, default=None, help="Prompt strength (default: the model's own)")
     p.add_argument("--width", type=int, default=1024, help="Image width (multiple of 8)")
     p.add_argument("--height", type=int, default=1024, help="Image height (multiple of 8)")
     p.add_argument("--seed", type=int, default=None, help="Random seed for reproducible results")
     p.add_argument("--count", type=int, default=1, help="Number of images to generate")
-    p.add_argument("--model", default=MODEL_ID, help="Hugging Face model id or local path")
+    p.add_argument("--model", default="sdxl", help="Model key, Hugging Face repo id, or local .safetensors path")
+    p.add_argument("--lora", action="append", default=[], metavar="NAME[:WEIGHT]",
+                   help="LoRA from models/loras/ to apply (repeatable)")
     p.add_argument("--out", type=Path, default=OUTPUT_DIR, help="Output directory")
+    p.add_argument("--list-models", action="store_true", help="List available models and exit")
     return p.parse_args()
 
 
-def check_gpu() -> torch.device:
+def check_gpu():
+    import torch
     if not torch.cuda.is_available():
         sys.exit("CUDA GPU not available. Install the CUDA build of PyTorch (see requirements.txt).")
     name = torch.cuda.get_device_name(0)
@@ -47,51 +53,58 @@ def check_gpu() -> torch.device:
     return torch.device("cuda")
 
 
-def load_pipeline(model_id: str, device: torch.device) -> StableDiffusionXLPipeline:
-    print(f"Loading model: {model_id} (first run downloads ~7 GB)...")
-    t0 = time.time()
-    pipe = StableDiffusionXLPipeline.from_pretrained(
-        model_id,
-        torch_dtype=torch.float16,
-        variant="fp16",
-        use_safetensors=True,
-    )
-    pipe.to(device)
-
-    # Memory-friendly VAE decoding; harmless on a 24 GB card, essential on smaller ones.
-    pipe.vae.enable_slicing()
-
-    vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
-    if vram_gb < 12:
-        # Offload idle sub-models to CPU so the pipeline fits on 8-10 GB cards.
-        pipe.enable_model_cpu_offload()
-
-    print(f"Model ready in {time.time() - t0:.1f}s")
-    return pipe
+def list_models() -> None:
+    for m in models.all_models():
+        where = "downloaded" if models.is_downloaded(m) else f"not downloaded (~{m.download_gb:g} GB)"
+        print(f"{m.key:12} {m.name:26} {m.steps:>3} steps  cfg {m.guidance:<4g} {where}")
+        print(f"{'':12} {m.description}")
+    print("LoRAs:", ", ".join(models.available_loras()) or "none in models/loras/")
 
 
 def main() -> None:
     args = parse_args()
-    device = check_gpu()
-    pipe = load_pipeline(args.model, device)
-    args.out.mkdir(parents=True, exist_ok=True)
+    if args.list_models:
+        list_models()
+        return
+    if not args.prompt:
+        sys.exit("Give a prompt, or --list-models.")
 
+    import torch
+
+    device = check_gpu()
+    try:
+        spec = models.resolve(args.model)
+    except KeyError:
+        sys.exit(f"Unknown model '{args.model}'. Known: {', '.join(m.key for m in models.all_models())}")
+
+    manager = models.ModelManager(device=str(device))
+    pipe = manager.load(spec)
+
+    loras = []
+    for item in args.lora:
+        name, _, weight = item.partition(":")
+        loras.append((name, float(weight) if weight else 1.0))
+    for note in manager.apply_loras(loras):
+        print(note)
+
+    steps = args.steps if args.steps is not None else spec.steps
+    guidance = args.guidance if args.guidance is not None else spec.guidance
+    negative = args.negative if spec.negative else ""
+    encoded = manager.encode(args.prompt, negative)
+
+    args.out.mkdir(parents=True, exist_ok=True)
     base_seed = args.seed if args.seed is not None else torch.seed() % (2**32)
 
     for i in range(args.count):
         seed = base_seed + i
         generator = torch.Generator(device=device).manual_seed(seed)
 
-        print(f"\n[{i + 1}/{args.count}] seed={seed} steps={args.steps} size={args.width}x{args.height}")
+        print(f"\n[{i + 1}/{args.count}] {spec.name}  seed={seed} steps={steps} cfg={guidance:g} "
+              f"size={args.width}x{args.height}  scheduler={manager.scheduler_name}")
         t0 = time.time()
         image = pipe(
-            prompt=args.prompt,
-            negative_prompt=args.negative,
-            num_inference_steps=args.steps,
-            guidance_scale=args.guidance,
-            width=args.width,
-            height=args.height,
-            generator=generator,
+            **encoded,
+            **manager.generation_kwargs(steps, guidance, args.width, args.height, generator),
         ).images[0]
         elapsed = time.time() - t0
 

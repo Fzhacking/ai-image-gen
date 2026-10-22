@@ -1,5 +1,5 @@
 """
-Local web UI for AI image generation on your GPU (Stable Diffusion XL via diffusers + Gradio).
+Local web UI for AI image generation on your GPU (diffusers + Gradio).
 
 Run:
     .venv/Scripts/python.exe app.py
@@ -8,8 +8,10 @@ Then open http://127.0.0.1:7860 in your browser.
 Everything is controlled from the prompt. Examples:
     "a cozy cabin in a snowy forest, 16:9, 4k"
     "portrait of a cyberpunk samurai, 3 images, seed 42"
-    "desktop wallpaper of a mountain lake, photorealistic"
-See prompt_parser.py for the full list of understood words.
+    "desktop wallpaper of a mountain lake, photorealistic"        -> auto-picks Juggernaut XL
+    "a knight in silver armour, model realvis, (glowing sword:1.3)"
+    "neon street at night using flux"
+See prompt_parser.py for the full list of understood words and models.py for the models.
 
 Every generation is recorded in generations.db (SQLite) with its settings, timings and GPU
 telemetry. The History tab browses that database.
@@ -23,14 +25,15 @@ from pathlib import Path
 import gradio as gr
 import pandas as pd
 import torch
-from diffusers import StableDiffusionXLPipeline
 
 import db
 import gpu_info
-from prompt_parser import parse
+import models
+from models import ModelManager, ModelSpec
+from prompt_parser import Settings, parse
 from upscaler import Upscaler
 
-MODEL_ID = "stabilityai/stable-diffusion-xl-base-1.0"
+STARTUP_MODEL = "sdxl"
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -41,6 +44,9 @@ HELP = """
 
 | Want | Say |
 |---|---|
+| A specific model | `model juggernaut`, `model: flux`, `using realvis` (or pick it in the Model box) |
+| Emphasis | `(glowing sword:1.3)`, `(word)++`, `(word)--` (SDXL models; long prompts are not cut off) |
+| LoRA | `<lora:name:0.8>` for `models/loras/name.safetensors` (SDXL models) |
 | Aspect ratio | `16:9`, `9:16`, `4:3`, `3:2`, `1:1`, `21:9` |
 | Exact size | `1920x1080`, `1024x768` (scaled to the GPU-friendly equivalent) |
 | Orientation | `portrait`, `landscape`, `square`, `wide`, `tall`, `wallpaper`, `phone wallpaper`, `poster`, `banner` |
@@ -53,38 +59,80 @@ HELP = """
 | Manual override | `30 steps`, `cfg 8` |
 """
 
-HISTORY_COLUMNS = ["id", "when", "prompt", "size", "steps", "seconds", "it/s", "peak VRAM GB", "temp C", "seed"]
+HISTORY_COLUMNS = ["id", "when", "prompt", "model", "size", "steps", "seconds", "it/s", "peak VRAM GB", "temp C", "seed"]
 
 
-def load_pipeline() -> StableDiffusionXLPipeline:
-    if not torch.cuda.is_available():
-        raise SystemExit("CUDA GPU not available. Install the CUDA build of PyTorch.")
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"Loading {MODEL_ID} ...")
-    t0 = time.time()
-    pipe = StableDiffusionXLPipeline.from_pretrained(
-        MODEL_ID, torch_dtype=torch.float16, variant="fp16", use_safetensors=True
-    ).to("cuda")
-    pipe.vae.enable_slicing()
-    pipe.set_progress_bar_config(disable=True)
-    print(f"Model ready in {time.time() - t0:.1f}s")
-    return pipe
+def models_markdown() -> str:
+    rows = ["| Say | Model | Steps | CFG | On disk | Best for |", "|---|---|---|---|---|---|"]
+    for m in models.all_models():
+        on_disk = "yes" if models.is_downloaded(m) else f"no (~{m.download_gb:g} GB)"
+        rows.append(f"| `model {m.key}` | {m.name} | {m.steps} | {m.guidance:g} | {on_disk} | {m.description} |")
+    loras = ", ".join(f"`<lora:{n}>`" for n in models.available_loras()) or "none yet"
+    rows += [
+        "",
+        "**Auto** picks a model from the style words in the prompt (photo/cinematic → Juggernaut, anime → Animagine, "
+        "painting → Playground, digital art/comic → DreamShaper) when that model is already on disk; otherwise it keeps "
+        "the model currently loaded.",
+        "",
+        f"**Add your own:** drop any SDXL `.safetensors` checkpoint (for example from Civitai) into `models/checkpoints/` and "
+        f"SDXL LoRAs into `models/loras/`, then restart the app. LoRAs available now: {loras}.",
+        "",
+        "**FLUX.1 [schnell]** needs a one-time Hugging Face login: accept the terms on its model page, run "
+        "`.venv\\Scripts\\huggingface-cli login`, then say `model flux`. On a 24 GB card it runs 4-bit with CPU offload.",
+    ]
+    return "\n".join(rows)
 
 
-PIPE = load_pipeline()
+MANAGER = ModelManager()
+MANAGER.load(STARTUP_MODEL)
 UPSCALER = Upscaler()
 print(f"Upscaler ready: {UPSCALER.name}")
 STATIC_GPU = gpu_info.static_info()
 
+MODEL_CHOICES = [("Auto (pick by style words in the prompt)", "auto")] + [
+    (f"{m.name}  -  {m.description}", m.key) for m in models.all_models()
+]
+
+
+# ----------------------------------------------------------------------------- model selection
+
+def pick_model(s: Settings, choice: str) -> tuple[ModelSpec, str | None]:
+    """Which model to use for this prompt, and an optional note explaining an automatic choice."""
+    if s.model:
+        try:
+            return models.resolve(s.model), None
+        except KeyError:
+            raise gr.Error(
+                f"Unknown model '{s.model}'. Available: {', '.join(m.key for m in models.all_models())}"
+            )
+    if choice and choice != "auto":
+        return models.resolve(choice), None
+    current = MANAGER.spec or models.resolve(STARTUP_MODEL)
+    suited = models.model_for_style(s.style)
+    if suited and suited.key != current.key:
+        if models.is_downloaded(suited):
+            return suited, f"auto: {suited.name} for '{s.style}'"
+        return current, f"{suited.name} suits '{s.style}' but is not downloaded; say 'model {suited.key}' to fetch it"
+    return current, None
+
 
 # ----------------------------------------------------------------------------- generate tab
 
-def preview(prompt: str) -> str:
+def preview(prompt: str, choice: str) -> str:
     """Live 'interpreted as' line shown under the prompt box."""
     if not prompt.strip():
         return ""
     s = parse(prompt)
-    line = f"**Will generate:** {s.summary()}"
+    try:
+        spec, note = pick_model(s, choice)
+    except gr.Error as e:
+        return f"**{e}**"
+    s.apply_defaults(spec.steps, spec.guidance)
+    if note:
+        s.notes.append(note)
+    line = f"**Will generate:** {s.summary()}  ·  model **{spec.name}**"
+    if not spec.negative and s.loras:
+        s.notes.append("LoRAs are ignored by FLUX")
     if s.notes:
         line += f"  \n<small>{' · '.join(s.notes)}</small>"
     return line
@@ -101,6 +149,7 @@ def details_markdown(rec: dict) -> str:
         f"- Save to disk: {g('save_seconds'):.2f} s  ·  Total: {g('total_seconds'):.2f} s",
         "",
         "**Image**",
+        f"- Model: **{models.display_name(g('model_id') or '')}**",
         f"- {g('width')}x{g('height')}, {g('steps')} steps, guidance {g('guidance'):g}, seed {g('seed')}",
         f"- File: `{Path(g('image_path', '')).name}` ({g('file_size_kb'):.0f} KB)",
         f"- Style: {g('style') or 'none'}  ·  Image {g('batch_index')}/{g('batch_size')}",
@@ -128,19 +177,34 @@ def details_markdown(rec: dict) -> str:
         "**Prompt sent to model**",
         f"> {g('final_prompt')}",
         "",
-        f"**Negative:** {g('negative_prompt')}",
+        f"**Negative:** {g('negative_prompt') or '(not supported by this model)'}",
     ]
     if g("parser_notes"):
-        lines.append(f"**Parser notes:** {g('parser_notes')}")
+        lines.append(f"**Notes:** {g('parser_notes')}")
     return "\n".join(lines)
 
 
-def generate(prompt: str, negative: str, progress=gr.Progress()):
+def generate(prompt: str, negative: str, model_choice: str, progress=gr.Progress()):
     if not prompt.strip():
         raise gr.Error("Please enter a prompt.")
 
     s = parse(prompt)
-    negative = negative.strip() or DEFAULT_NEGATIVE
+    spec, auto_note = pick_model(s, model_choice)
+    if auto_note:
+        s.notes.append(auto_note)
+    s.apply_defaults(spec.steps, spec.guidance)
+    negative = (negative.strip() or DEFAULT_NEGATIVE) if spec.negative else ""
+
+    if MANAGER.spec is None or MANAGER.spec.key != spec.key:
+        progress(0, desc=f"Loading {spec.name}" + ("" if models.is_downloaded(spec) else f" (downloading ~{spec.download_gb:g} GB)"))
+    try:
+        pipe = MANAGER.load(spec)
+    except RuntimeError as e:
+        raise gr.Error(str(e))
+    s.notes.extend(MANAGER.apply_loras(s.loras))
+    s.notes.append(f"scheduler {MANAGER.scheduler_name}")
+    encoded = MANAGER.encode(s.prompt, negative)
+
     base_seed = s.seed if s.seed is not None else random.randint(0, 2**32 - 1)
     total_steps = s.steps * s.count
     images, reports = [], []
@@ -150,22 +214,16 @@ def generate(prompt: str, negative: str, progress=gr.Progress()):
         gen = torch.Generator(device="cuda").manual_seed(seed)
 
         def on_step(pipe, step, timestep, kwargs, i=i):
-            progress((i * s.steps + step + 1) / total_steps, desc=f"Image {i + 1}/{s.count}")
+            progress((i * s.steps + step + 1) / total_steps, desc=f"Image {i + 1}/{s.count}  ·  {spec.name}")
             return kwargs
 
         torch.cuda.reset_peak_memory_stats()
         before = gpu_info.snapshot()
         t_start = time.perf_counter()
 
-        img = PIPE(
-            prompt=s.prompt,
-            negative_prompt=negative,
-            num_inference_steps=s.steps,
-            guidance_scale=s.guidance,
-            width=s.width,
-            height=s.height,
-            generator=gen,
-            callback_on_step_end=on_step,
+        img = pipe(
+            **encoded,
+            **MANAGER.generation_kwargs(s.steps, s.guidance, s.width, s.height, gen, on_step),
         ).images[0]
         torch.cuda.synchronize()
         t_infer = time.perf_counter()
@@ -210,7 +268,7 @@ def generate(prompt: str, negative: str, progress=gr.Progress()):
             "final_prompt": s.prompt,
             "negative_prompt": negative,
             "parser_notes": " · ".join(s.notes),
-            "model_id": MODEL_ID,
+            "model_id": spec.source,
             "width": s.width, "height": s.height, "steps": s.steps, "guidance": s.guidance,
             "seed": seed, "style": s.style, "batch_index": i + 1, "batch_size": s.count,
             "inference_seconds": round(t_infer - t_start, 3),
@@ -238,7 +296,7 @@ def generate(prompt: str, negative: str, progress=gr.Progress()):
             "pstate": after.get("pstate"),
         }
         rec["id"] = db.insert(rec)
-        print(f"#{rec['id']} saved {path.name}  {s.width}x{s.height}  {rec['inference_seconds']}s  "
+        print(f"#{rec['id']} {spec.key} saved {path.name}  {s.width}x{s.height}  {rec['inference_seconds']}s  "
               f"peak {rec['vram_peak_gb']} GB  {rec['temp_after_c']} C"
               + (f"  -> {final_img.width}x{final_img.height} in {upscale_rec['upscale_seconds']}s" if upscale_rec else ""))
         images.append(final_img)
@@ -253,6 +311,7 @@ def history_table(search: str = "", limit: int = 50) -> pd.DataFrame:
     rows = db.fetch(limit=int(limit), search=search)
     data = [
         [r["id"], r["created_at"][:16].replace("T", " "), r["user_prompt"][:70],
+         models.display_name(r.get("model_id") or ""),
          (f"{r['width']}x{r['height']} → {r['upscaled_width']}x{r['upscaled_height']}"
           if r.get("upscaled_width") else f"{r['width']}x{r['height']}"),
          r["steps"], r["inference_seconds"], r["steps_per_second"],
@@ -307,26 +366,35 @@ with gr.Blocks(title="AI Image Generator") as demo:
                         placeholder="a cozy cabin in a snowy forest at dusk, cinematic, 16:9, 4k",
                     )
                     interpreted = gr.Markdown("")
+                    model_choice = gr.Dropdown(
+                        MODEL_CHOICES, value="auto", label="Model",
+                        info="Or name it in the prompt: 'model juggernaut'. Switching models takes ~15 s; "
+                             "the first use of a model downloads it.",
+                    )
                     negative = gr.Textbox(label="Negative prompt (what to avoid)", lines=2, value=DEFAULT_NEGATIVE)
                     run = gr.Button("Generate", variant="primary")
                     with gr.Accordion("What can I write in the prompt?", open=False):
                         gr.Markdown(HELP)
+                    with gr.Accordion("Models", open=False):
+                        gr.Markdown(models_markdown())
 
                 with gr.Column(scale=2):
                     gallery = gr.Gallery(label="Results", columns=2, height=560, object_fit="contain")
                     with gr.Accordion("Generation details (GPU, timing, settings)", open=True):
                         details = gr.Markdown("")
 
-            prompt.change(preview, prompt, interpreted, show_progress="hidden")
-            run.click(generate, [prompt, negative], [gallery, details])
-            prompt.submit(generate, [prompt, negative], [gallery, details])
+            prompt.change(preview, [prompt, model_choice], interpreted, show_progress="hidden")
+            model_choice.change(preview, [prompt, model_choice], interpreted, show_progress="hidden")
+            run.click(generate, [prompt, negative, model_choice], [gallery, details])
+            prompt.submit(generate, [prompt, negative, model_choice], [gallery, details])
 
             gr.Examples(
                 examples=[
                     ["a cozy cabin in a snowy forest at dusk, cinematic, 16:9, 4k"],
-                    ["portrait of a cyberpunk samurai in neon rain, 2 images"],
-                    ["desktop wallpaper of a misty mountain lake at sunrise, photorealistic"],
-                    ["a corgi astronaut floating in space, 3d render, square, seed 7"],
+                    ["close-up portrait of an old fisherman, weathered skin, golden hour, photorealistic"],
+                    ["a knight in silver armour in a misty forest, (glowing blue sword:1.3), model realvis"],
+                    ["anime girl with a red umbrella in the rain, tall, 2 images"],
+                    ["a corgi astronaut floating in space, 3d render, square, seed 7, using dreamshaper"],
                     ["watercolor of a paris street cafe, tall, quick"],
                 ],
                 inputs=[prompt],

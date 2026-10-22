@@ -17,13 +17,23 @@ Understood in the prompt (case-insensitive):
   Seed            "seed 42", "seed: 42", "seed=42"
   Steps           "30 steps", "steps 30", "steps=30"
   Guidance        "cfg 8", "guidance 8", "cfg=8"
+  Model           "model juggernaut", "model: flux", "using realvis"  (see models.py for the list)
+  LoRA            "<lora:name:0.8>", "<lora:name>"   (files in models/loras/)
+  Weighting       "(red hair:1.3)", "(word)++"   kept in the prompt, applied by compel
 
-Numeric directives (resolution, ratio, seed, count, steps, cfg) are removed from the prompt sent
-to the model. Descriptive words (portrait, 4k, anime ...) stay in because they help the model too.
+Numeric directives (resolution, ratio, seed, count, steps, cfg), model and LoRA tags are removed
+from the prompt sent to the model. Descriptive words (portrait, 4k, anime ...) stay in because
+they help the model too.
+
+Steps and guidance are only final after apply_defaults(): the parser records whether the user
+set them explicitly, and the chosen model supplies the defaults (a turbo model wants 6 steps,
+FLUX wants 4, SDXL wants 30).
 """
 
 import re
 from dataclasses import dataclass, field
+
+from models import model_words
 
 MAX_SIDE = 1536
 MIN_SIDE = 512
@@ -96,6 +106,32 @@ class Settings:
     upscale_to: int | None = None   # long side in px after upscaling, None = no upscale
     exact_size: tuple[int, int] | None = None  # crop the upscaled image to exactly this size
     notes: list[str] = field(default_factory=list)
+    model: str | None = None                 # model key/alias named in the prompt, None = auto
+    loras: list[tuple[str, float]] = field(default_factory=list)
+    steps_explicit: bool = False
+    guidance_explicit: bool = False
+    quality: str | None = None               # "high" | "low" | None
+    fidelity: str | None = None              # "strict" | "creative" | None
+
+    def apply_defaults(self, base_steps: int, base_guidance: float) -> None:
+        """Fill steps/guidance from the chosen model unless the prompt set them explicitly."""
+        if not self.steps_explicit:
+            steps = base_steps
+            if self.quality == "high":
+                steps = round(base_steps * 1.35)
+            elif self.quality == "low":
+                steps = max(1, round(base_steps * 0.5))
+            self.steps = max(1, min(100, steps))
+        if not self.guidance_explicit:
+            g = base_guidance
+            if g > 0:
+                if self.fidelity == "strict":
+                    g = base_guidance * 1.3
+                elif self.fidelity == "creative":
+                    g = base_guidance * 0.7
+            elif self.fidelity:  # guidance-free models (FLUX schnell) ignore fidelity words
+                self.notes.append("this model has no guidance scale, fidelity words ignored")
+            self.guidance = round(max(0.0, min(20.0, g)), 1)
 
     def summary(self) -> str:
         parts = [f"{self.width}x{self.height}", f"{self.steps} steps", f"guidance {self.guidance:g}"]
@@ -108,6 +144,10 @@ class Settings:
             parts.append(f"{self.count} images")
         if self.seed is not None:
             parts.append(f"seed {self.seed}")
+        if self.model:
+            parts.append(f"model {self.model}")
+        for name, w in self.loras:
+            parts.append(f"lora {name} x{w:g}")
         return "  |  ".join(parts)
 
     def upscaled_size(self) -> tuple[int, int]:
@@ -147,6 +187,22 @@ def parse(text: str) -> Settings:
     low = s.prompt.lower()  # for descriptive-word checks that do not alter the prompt
     ratio_set = False
     requested: tuple[int, int] | None = None
+
+    # LoRA tags: <lora:name:0.8> or <lora:name>
+    while (m := _take(s, r"<\s*lora\s*:\s*([^:<>]+?)\s*(?::\s*(-?\d*\.?\d+))?\s*>")):
+        weight = float(m.group(2)) if m.group(2) else 1.0
+        s.loras.append((m.group(1).strip(), max(-2.0, min(2.0, weight))))
+
+    # model: "model juggernaut", "model: flux", "checkpoint=realvis", "using realvis", "with flux"
+    m = _take(s, r"\b(?:model|checkpoint|ckpt)\s*[:=]?\s*([a-z0-9][a-z0-9_.\-]*)")
+    if m:
+        s.model = m.group(1).lower()
+    else:
+        words = "|".join(re.escape(w) for w in model_words())
+        if words:
+            m = _take(s, rf"\b(?:using|with|via|on)\s+(?:the\s+)?({words})(?:\s+model)?\b")
+            if m:
+                s.model = m.group(1).lower()
 
     # explicit resolution, e.g. 1920x1080
     m = _take(s, r"\b(\d{3,4})\s*[x×]\s*(\d{3,4})\b")
@@ -192,23 +248,25 @@ def parse(text: str) -> Settings:
     m = _take(s, r"\b(?:steps?\s*[:=]?\s*(\d{1,3})|(\d{1,3})\s*steps?)\b")
     if m:
         s.steps = max(1, min(100, int(m.group(1) or m.group(2))))
+        s.steps_explicit = True
     elif s.upscale_to or re.search(HIGH_QUALITY, low):
-        s.steps = 40
-        s.notes.append("high quality -> 40 steps")
+        s.quality = "high"
+        s.notes.append("high quality -> more steps")
     elif re.search(LOW_QUALITY, low):
-        s.steps = 15
-        s.notes.append("quick -> 15 steps")
+        s.quality = "low"
+        s.notes.append("quick -> fewer steps")
 
     # guidance
     m = _take(s, r"\b(?:cfg|guidance)\s*[:=]?\s*(\d{1,2}(?:\.\d)?)\b")
     if m:
-        s.guidance = max(1.0, min(20.0, float(m.group(1))))
+        s.guidance = max(0.0, min(20.0, float(m.group(1))))
+        s.guidance_explicit = True
     elif re.search(STRICT, low):
-        s.guidance = 9.0
-        s.notes.append("strict -> guidance 9")
+        s.fidelity = "strict"
+        s.notes.append("strict -> higher guidance")
     elif re.search(CREATIVE, low):
-        s.guidance = 5.0
-        s.notes.append("creative -> guidance 5")
+        s.fidelity = "creative"
+        s.notes.append("creative -> lower guidance")
 
     # count
     m = _take(s, r"\b(?:(\d)\s*(?:images?|variations?|versions?|pictures?|pics?)|x\s?(\d))\b")
@@ -231,7 +289,9 @@ def parse(text: str) -> Settings:
 
     # tidy leftovers from removed directives
     s.prompt = re.sub(r"\s*,(\s*,)+", ",", s.prompt)
+    s.prompt = re.sub(r"\s+,", ",", s.prompt)
     s.prompt = re.sub(r"\s{2,}", " ", s.prompt).strip(" ,")
+    s.apply_defaults(s.steps, s.guidance)  # SDXL baseline; the app re-applies for the chosen model
     return s
 
 
@@ -246,6 +306,9 @@ if __name__ == "__main__":
         "oil painting of a ship in a storm 21:9 steps 45 cfg 8",
         "square icon of a fox, 2k",
         "a bowl of ramen",
+        "a knight in silver armour, model juggernaut, (glowing sword:1.3), highly detailed",
+        "neon city street at night using flux, 16:9",
+        "cat astronaut <lora:pixel-style:0.7> <lora:detailer> with dreamshaper, quick",
     ]
     for t in tests:
         r = parse(t)
