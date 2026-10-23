@@ -284,6 +284,17 @@ Prompts are cycled with fresh seeds when `--count` exceeds the set, so every ima
 built-in Nature set has 50 prompts (mountains, forests, oceans, deserts, wildlife, macro, weather,
 seasons); 50 Z-Image Turbo images take about 9 minutes on an RTX 3090.
 
+`upscale_batch.py` upscales a whole category afterwards with Real-ESRGAN, exactly like the Studio's
+Upscale bar, and records the results (it runs in its own process, so the app can stay up):
+
+```powershell
+.\.venv\Scripts\python.exe upscale_batch.py --category Nature --targets 4k 8k   # <stem>_3840px.png and _7680px.png
+.\.venv\Scripts\python.exe upscale_batch.py --ids 31 32 --targets 2k
+```
+
+The database row keeps the largest target in its upscale columns and lists every target under
+`extra_json["upscales"]`; existing files are skipped, so the command can be re-run.
+
 ## Generation details and history
 
 After every run the Generate tab shows a report under the gallery: inference time and
