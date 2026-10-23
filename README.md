@@ -262,6 +262,28 @@ The image is based on `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` with PyTorc
 The first build downloads several GB of Python packages. Inside the container the Admin panel shows
 the container's own view of CPU, memory and network; GPU readings come from the host driver.
 
+## Categories and batch generation
+
+Give an image a **category** in the Studio (the Category box under the negative prompt; type a new
+one or pick an existing one) and it is saved to `outputs\<Category>\` instead of `outputs\`, recorded
+with that category in `generations.db`, and its prompt is stored under the category in the
+`prompt_library` table. The History tab filters by category.
+
+`batch.py` generates a whole category through the running app (start `app.py` first):
+
+```powershell
+.\.venv\Scripts\python.exe batch.py --category Nature --count 50              # built-in Nature prompt set
+.\.venv\Scripts\python.exe batch.py --category Nature --count 20 --model juggernaut --seed-start 100
+.\.venv\Scripts\python.exe batch.py --category Cities --prompts my_prompts.txt # one prompt per line
+.\.venv\Scripts\python.exe batch.py --list                                     # built-in prompt sets
+.\.venv\Scripts\python.exe db.py categories                                    # counts per category
+.\.venv\Scripts\python.exe db.py prompts Nature                                # the stored prompts
+```
+
+Prompts are cycled with fresh seeds when `--count` exceeds the set, so every image differs. The
+built-in Nature set has 50 prompts (mountains, forests, oceans, deserts, wildlife, macro, weather,
+seasons); 50 Z-Image Turbo images take about 9 minutes on an RTX 3090.
+
 ## Generation details and history
 
 After every run the Generate tab shows a report under the gallery: inference time and

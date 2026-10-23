@@ -68,7 +68,7 @@ OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 UPSCALE_CHOICES = [("2K (2560 px)", "2k"), ("4K (3840 px)", "4k"), ("8K (7680 px)", "8k")]
-HISTORY_COLUMNS = ["id", "kind", "when", "prompt", "model", "size / length", "steps", "seconds", "it/s", "peak VRAM GB", "temp C", "seed"]
+HISTORY_COLUMNS = ["id", "kind", "category", "when", "prompt", "model", "size / length", "steps", "seconds", "it/s", "peak VRAM GB", "temp C", "seed"]
 KIND_CHOICES = [("Everything", ""), ("Images", "image"), ("Videos", "video"), ("Music", "music")]
 
 HELP = """
@@ -281,9 +281,23 @@ def upscale_record(rec: dict, target_px: int, exact_size: tuple[int, int] | None
     }
 
 
-def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] | None = None, progress=gr.Progress()):
+def safe_category(text: str | None) -> str:
+    """A category name that is also a safe folder name under outputs/ ('' = none)."""
+    text = re.sub(r"[^\w \-]+", "", (text or "").strip()).strip(" .")
+    return text[:40]
+
+
+def category_choices() -> list[str]:
+    return [c["category"] for c in db.categories()]
+
+
+def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] | None = None, category: str = "",
+             progress=gr.Progress()):
     if not prompt.strip():
         raise gr.Error("Please enter a prompt.")
+    category = safe_category(category)
+    out_dir = OUTPUT_DIR / category if category else OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     s = parse(prompt)
     add_ui_loras(s, loras_ui)
@@ -332,7 +346,7 @@ def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] 
             mem = gpu_info.torch_memory()
 
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            path = OUTPUT_DIR / f"{stamp}_seed{seed}.png"
+            path = out_dir / f"{stamp}_seed{seed}.png"
             img.save(path)
             t_end = time.perf_counter()
 
@@ -340,6 +354,7 @@ def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] 
                 "created_at": datetime.now().isoformat(timespec="seconds"),
                 "image_path": str(path),
                 "file_size_kb": round(path.stat().st_size / 1024, 1),
+                "category": category or None,
                 "user_prompt": prompt.strip(),
                 "final_prompt": s.prompt,
                 "negative_prompt": negative,
@@ -380,6 +395,8 @@ def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] 
                 final_path = rec["upscaled_path"]
 
             rec["id"] = db.insert(rec)
+            if category:
+                db.add_prompt(category, prompt.strip(), "image", "studio", rec["id"])
             print(f"#{rec['id']} {spec.key} saved {path.name}  {s.width}x{s.height}  {rec['inference_seconds']}s  "
                   f"peak {rec['vram_peak_gb']} GB  {rec['temp_after_c']} C"
                   + (f"  -> {rec['upscaled_width']}x{rec['upscaled_height']} in {rec['upscale_seconds']}s" if rec.get("upscaled_path") else ""))
@@ -493,9 +510,10 @@ def history_model_choices():
     return [("All models", "")] + [(models.display_name(m), m) for m in db.models_used()]
 
 
-def history_rows(search: str = "", limit: int = 50, model_id: str = "", upscaled_only: bool = False, kind: str = "") -> list[dict]:
+def history_rows(search: str = "", limit: int = 50, model_id: str = "", upscaled_only: bool = False, kind: str = "",
+                 category: str = "") -> list[dict]:
     return db.fetch_filtered(limit=int(limit or 50), search=search or "", model_id=model_id or None, upscaled_only=bool(upscaled_only),
-                             kind=kind or None)
+                             kind=kind or None, category=category or None)
 
 
 def _size_text(r: dict) -> str:
@@ -512,7 +530,7 @@ def _size_text(r: dict) -> str:
 
 def history_table(rows: list[dict]) -> pd.DataFrame:
     data = [
-        [r["id"], r.get("kind") or "image", r["created_at"][:16].replace("T", " "), r["user_prompt"][:70],
+        [r["id"], r.get("kind") or "image", r.get("category") or "", r["created_at"][:16].replace("T", " "), r["user_prompt"][:70],
          models.display_name(r.get("model_id") or ""), _size_text(r),
          r["steps"], r["inference_seconds"], r["steps_per_second"],
          r["vram_peak_gb"], r["temp_after_c"], r["seed"]]
@@ -576,10 +594,12 @@ def history_stats() -> str:
     )
 
 
-def refresh_history(search: str, limit: int, model_id: str, upscaled_only: bool, kind: str = ""):
-    rows = history_rows(search, limit, model_id, upscaled_only, kind)
+def refresh_history(search: str, limit: int, model_id: str, upscaled_only: bool, kind: str = "", category: str = ""):
+    rows = history_rows(search, limit, model_id, upscaled_only, kind, category)
+    cats = category_choices()
     return (history_table(rows), history_gallery(rows), history_stats(),
-            gr.update(choices=history_model_choices(), value=model_id if model_id in db.models_used() else ""))
+            gr.update(choices=history_model_choices(), value=model_id if model_id in db.models_used() else ""),
+            gr.update(choices=[("All categories", "")] + [(c, c) for c in cats], value=category if category in cats else ""))
 
 
 _NO_PREVIEW = (gr.update(value=None, visible=True), gr.update(value=None, visible=False), gr.update(value=None, visible=False))
@@ -634,12 +654,13 @@ def reuse_prompt(row_id: int | None, with_seed: bool):
             gr.Tabs(selected=tab))
 
 
-def delete_history(row_id: int | None, remove_files: bool, search: str, limit: int, model_id: str, upscaled_only: bool, kind: str = ""):
+def delete_history(row_id: int | None, remove_files: bool, search: str, limit: int, model_id: str, upscaled_only: bool, kind: str = "",
+                   category: str = ""):
     if not row_id:
         raise gr.Error("Select a generation first.")
     removed = db.delete(int(row_id), remove_files=remove_files)
     gr.Info(f"Deleted generation #{row_id}" + (f" and {len(removed)} file(s)" if removed else ""))
-    rows = history_rows(search, limit, model_id, upscaled_only, kind)
+    rows = history_rows(search, limit, model_id, upscaled_only, kind, category)
     return history_table(rows), history_gallery(rows), history_stats(), *_NO_PREVIEW, "", None
 
 
@@ -681,6 +702,9 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
                              "Auto switches to a model of the LoRA's family.",
                     )
                     negative = gr.Textbox(label="Negative prompt (what to avoid)", lines=2, value=default_negative())
+                    category_box = gr.Dropdown(category_choices(), value="", label="Category (optional)", allow_custom_value=True,
+                                               info="Type a new one or pick an existing one. Images go to outputs/<category>/ and the prompt is "
+                                                    "stored under that category in the database.")
                     with gr.Row():
                         run = gr.Button("Generate", variant="primary", size="lg", scale=3)
                         clear = gr.Button("Clear", variant="secondary", size="lg", scale=1, min_width=90)
@@ -708,7 +732,7 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
             prompt.change(preview, preview_inputs, interpreted, show_progress="hidden")
             model_choice.change(preview, preview_inputs, interpreted, show_progress="hidden")
             lora_choice.change(preview, preview_inputs, interpreted, show_progress="hidden")
-            gen_inputs = [prompt, negative, model_choice, lora_choice]
+            gen_inputs = [prompt, negative, model_choice, lora_choice, category_box]
             gen_outputs = [gallery, details, last_records, selected_index, upscale_bar, upscale_note, loaded_md, empty_state]
             run.click(generate, gen_inputs, gen_outputs, concurrency_id="gpu")
             prompt.submit(generate, gen_inputs, gen_outputs, concurrency_id="gpu")
@@ -721,8 +745,10 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
             for b in chip_buttons:
                 b.click(toggle_chip, [prompt, gr.State(b.value)], prompt, show_progress="hidden")
             seed_chip.click(chip_seed, prompt, prompt, show_progress="hidden")
-            studio_tab.select(lambda c, l: (model_choice_update(c), lora_choice_update(l), model_cards_html(MANAGER)),
-                              [model_choice, lora_choice], [model_choice, lora_choice, model_cards], show_progress="hidden")
+            studio_tab.select(lambda c, l, cat: (model_choice_update(c), lora_choice_update(l), model_cards_html(MANAGER),
+                                                 gr.update(choices=category_choices(), value=cat)),
+                              [model_choice, lora_choice, category_box], [model_choice, lora_choice, model_cards, category_box],
+                              show_progress="hidden")
 
             gr.Examples(
                 examples=[
@@ -754,11 +780,13 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
             with gr.Row():
                 search = gr.Textbox(label="Search prompts", placeholder="cabin", scale=3)
                 h_kind = gr.Dropdown(KIND_CHOICES, value="", label="Kind", scale=1)
+                h_category = gr.Dropdown([("All categories", "")] + [(c, c) for c in category_choices()], value="", label="Category", scale=1,
+                                         allow_custom_value=True)
                 h_model = gr.Dropdown(history_model_choices(), value="", label="Model", scale=2)
                 h_upscaled = gr.Checkbox(label="Upscaled only", value=False, scale=1)
                 limit = gr.Number(label="Show last", value=50, precision=0, scale=1)
                 refresh = gr.Button("Refresh", scale=1)
-            h_filters = [search, limit, h_model, h_upscaled, h_kind]
+            h_filters = [search, limit, h_model, h_upscaled, h_kind, h_category]
             with gr.Tabs():
                 with gr.Tab("Table"):
                     table = gr.Dataframe(
@@ -783,7 +811,7 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
                     hist_details = gr.Markdown("")
             h_selected = gr.State(None)
 
-            h_outputs = [table, thumbs, stats_md, h_model]
+            h_outputs = [table, thumbs, stats_md, h_model, h_category]
             h_preview = [hist_image, hist_video, hist_audio, hist_details, h_selected]
             history_tab.select(refresh_history, h_filters, h_outputs)
             refresh.click(refresh_history, h_filters, h_outputs)
@@ -791,6 +819,7 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
             h_model.input(refresh_history, h_filters, h_outputs)
             h_upscaled.input(refresh_history, h_filters, h_outputs)
             h_kind.input(refresh_history, h_filters, h_outputs)
+            h_category.input(refresh_history, h_filters, h_outputs)
             table.select(select_history, [table], h_preview)
             thumbs.select(select_history_thumb, None, h_preview)
             reuse_targets = [prompt, video_ui.prompt, music_ui.prompt, tabs]

@@ -6,6 +6,8 @@ Database file: generations.db next to this script.
     python db.py            # print the last 20 generations
     python db.py 12         # print full details of generation #12
     python db.py stats      # totals and averages
+    python db.py categories # categories with generation and prompt counts
+    python db.py prompts Nature   # the prompt library of one category (all categories without a name)
 """
 
 import json
@@ -76,6 +78,16 @@ CREATE TABLE IF NOT EXISTS generations (
     extra_json          TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_generations_created ON generations(created_at);
+CREATE TABLE IF NOT EXISTS prompt_library (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at      TEXT NOT NULL,
+    category        TEXT NOT NULL,
+    prompt          TEXT NOT NULL,
+    kind            TEXT,
+    source          TEXT,
+    generation_id   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_prompt_library_category ON prompt_library(category);
 """
 
 
@@ -95,6 +107,8 @@ NEW_COLUMNS = {
     "frames": "INTEGER",
     "sample_rate": "INTEGER",
     "soundtrack_path": "TEXT",
+    # categories (2.3): a generation can belong to a category; its file then lives in outputs/<category>/
+    "category": "TEXT",
 }
 
 
@@ -252,7 +266,7 @@ def counts_by_kind() -> dict[str, dict[str, Any]]:
 
 
 def fetch_filtered(limit: int = 50, search: str = "", model_id: str | None = None, upscaled_only: bool = False,
-                   kind: str | None = None) -> list[dict[str, Any]]:
+                   kind: str | None = None, category: str | None = None) -> list[dict[str, Any]]:
     where, args = [], []
     if search:
         where.append("(user_prompt LIKE ? OR final_prompt LIKE ?)")
@@ -265,9 +279,45 @@ def fetch_filtered(limit: int = 50, search: str = "", model_id: str | None = Non
     if kind:
         where.append("COALESCE(kind, 'image') = ?")
         args.append(kind)
+    if category:
+        where.append("category = ? COLLATE NOCASE")
+        args.append(category)
     sql = "SELECT * FROM generations" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT ?"
     with connect() as con:
         return [dict(r) for r in con.execute(sql, [*args, limit])]
+
+
+# ----------------------------------------------------------------------------- categories and the prompt library
+
+def categories() -> list[dict[str, Any]]:
+    """Every category seen so far (from generations and the prompt library) with counts."""
+    with connect() as con:
+        rows = con.execute(
+            "SELECT category, SUM(n) AS items, SUM(p) AS prompts FROM ("
+            "  SELECT category, COUNT(*) AS n, 0 AS p FROM generations WHERE category IS NOT NULL AND category != '' GROUP BY category"
+            "  UNION ALL SELECT category, 0, COUNT(*) FROM prompt_library GROUP BY category"
+            ") GROUP BY category COLLATE NOCASE ORDER BY category COLLATE NOCASE"
+        )
+        return [dict(r) for r in rows]
+
+
+def add_prompt(category: str, prompt: str, kind: str = "image", source: str = "studio", generation_id: int | None = None) -> int:
+    """Store a prompt under a category (one row per generation, so the library doubles as a per-category log)."""
+    from datetime import datetime
+    with connect() as con:
+        cur = con.execute(
+            "INSERT INTO prompt_library (created_at, category, prompt, kind, source, generation_id) VALUES (?, ?, ?, ?, ?, ?)",
+            [datetime.now().isoformat(timespec="seconds"), category.strip(), prompt.strip(), kind, source, generation_id])
+        return cur.lastrowid
+
+
+def prompts(category: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
+    with connect() as con:
+        if category:
+            rows = con.execute("SELECT * FROM prompt_library WHERE category = ? COLLATE NOCASE ORDER BY id LIMIT ?", [category, limit])
+        else:
+            rows = con.execute("SELECT * FROM prompt_library ORDER BY category COLLATE NOCASE, id LIMIT ?", [limit])
+        return [dict(r) for r in rows]
 
 
 def _print_row(r: dict[str, Any]) -> None:
@@ -280,6 +330,13 @@ if __name__ == "__main__":
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     if arg == "stats":
         _print_row(stats())
+    elif arg == "categories":
+        for c in categories():
+            print(f"{c['category']:<24} {c['items']:>4} generations  {c['prompts']:>4} prompts")
+    elif arg == "prompts":
+        cat = sys.argv[2] if len(sys.argv) > 2 else None
+        for p in prompts(cat):
+            print(f"[{p['category']}] #{p['generation_id'] or '-'}  {p['prompt']}")
     elif arg.isdigit():
         row = get(int(arg))
         _print_row(row) if row else print(f"no generation #{arg}")

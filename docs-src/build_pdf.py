@@ -30,8 +30,8 @@ IMAGES = Path(__file__).resolve().parent / "images"
 OWNER = "Frazile AI"
 PRODUCT = "AI Image Generator"
 SUBTITLE = "Technical Documentation, Workflows and Requirements"
-VERSION = "2.2"
-DATE = "22 October 2026"
+VERSION = "2.3"
+DATE = "23 October 2026"
 PLATFORM = "NVIDIA GeForce RTX 3090, Windows 11, Python 3.12"
 TAGLINE = ("Images, video and music on one GPU: Z-Image Turbo, SDXL fine-tunes, Qwen-Image, FLUX.1, LoRAs, LTX-Video, Wan 2.1, MusicGen and Real-ESRGAN, served "
            "locally with Gradio in the Frazile AI studio UI, with per-image GPU telemetry recorded in SQLite and an "
@@ -509,6 +509,15 @@ def sec_workflows():
              '.\\.venv\\Scripts\\python.exe generate.py "cat astronaut" --model dreamshaper --lora pixel-style:0.7\n'
              '.\\.venv\\Scripts\\python.exe generate.py --help'),
         P("The script loads the model per run, so it is best for batches. It writes to outputs\\ but does not record to the database or upscale."),
+        P("To generate a whole category with the app's own pipeline (database record, telemetry, category folder and prompt "
+          "library), keep the app running and use batch.py:"),
+        code('.\\.venv\\Scripts\\python.exe batch.py --category Nature --count 50\n'
+             '.\\.venv\\Scripts\\python.exe batch.py --category Cities --prompts my_prompts.txt --model juggernaut --seed-start 100\n'
+             '.\\.venv\\Scripts\\python.exe db.py prompts Nature'),
+        P("Prompts come from a built-in set (Nature: 50 prompts covering mountains, forests, oceans, deserts, wildlife, macro, "
+          "weather and seasons) or a text file with one prompt per line; they are cycled with fresh seeds when the count is "
+          "larger than the set, and --skip resumes an interrupted batch at a given prompt. Each image is saved to "
+          "outputs/<category>/ with its category in generations and its prompt in prompt_library."),
         H2("4.9 Upscaling an existing image", "s4-9"),
         code(".\\.venv\\Scripts\\python.exe upscaler.py outputs\\some_image.png 3840"),
         P("The result is written next to the input with an _up3840 suffix. For images made in the app, prefer the Upscale bar so the history row is updated too."),
@@ -707,6 +716,7 @@ def sec_modules():
         table(["File", "Purpose"], [
             ["requirements.txt", "Python dependencies with the note on installing the CUDA PyTorch build first"],
             ["run-app.bat", "Double-click launcher that runs app.py inside the virtual environment"],
+            ["batch.py", "Category batch generation through the running app (built-in prompt sets or a prompt file)"],
             ["README.md", "User-facing quick start, model table, prompt reference, Admin and Docker sections"],
             ["Dockerfile, docker-compose.yml, .dockerignore", "Container image and service definition (section 12)"],
             ["models/RealESRGAN_x4plus.pth", "Upscaler weights for images"],
@@ -977,12 +987,26 @@ def sec_database():
             ["frames", "INTEGER", "Number of frames in a clip"],
             ["sample_rate", "INTEGER", "Sample rate of a track (32000 for MusicGen, 44100 for Stable Audio)"],
             ["soundtrack_path", "TEXT", "The _music.mp4 written when a track was laid under the clip"],
+            ["category", "TEXT", "Category chosen in the Studio or by batch.py (v2.3); the file then lives in outputs/<category>/"],
         ], [1.2, 0.8, 3]),
         P("db.counts_by_kind() returns count, today, GPU seconds and total duration per kind; fetch_filtered() takes a kind "
           "filter; stats_by_model() counts clips and tracks like images (the Admin table calls the column uses)."),
         H3("Catch-all"),
         table(["Column", "Type", "Meaning"], [
             ["extra_json", "TEXT", "JSON of any record keys that have no column, for forward compatibility"],
+        ], [1.2, 0.8, 3]),
+        H3("Table: prompt_library (v2.3)"),
+        P("Every prompt generated under a category, one row per generation, so the prompts of a category can be listed, "
+          "exported or reused without the images. Written by app.generate() when a category is set (the Studio box or "
+          "batch.py); read by db.prompts(), db.categories() and the History category filter."),
+        table(["Column", "Type", "Meaning"], [
+            ["id", "INTEGER", "Primary key"],
+            ["created_at", "TEXT", "ISO timestamp"],
+            ["category", "TEXT", "Category name as typed (case-insensitive matching)"],
+            ["prompt", "TEXT", "The prompt as written by the user (including hints such as 16:9 or seed 1001)"],
+            ["kind", "TEXT", "image (video and music do not use categories yet)"],
+            ["source", "TEXT", "studio (the Studio box and batch.py both go through the app)"],
+            ["generation_id", "INTEGER", "The generations row the prompt produced"],
         ], [1.2, 0.8, 3]),
         H2("8.3 Example queries", "s8-3"),
         P("Average inference time by model:"),
@@ -1440,6 +1464,12 @@ def sec_changelog():
             "Admin: Overview tiles for images / videos / tracks and seconds of media, Loaded now shows both managers, Load now and Unload work for video and music models, model status shows fps, limits and image-to-video support; the header pill shows both loaded models.",
             "Verified on the RTX 3090 through the Gradio API: see section 10.7 for the measured figures.",
         ]),
+        H3("Increment 13: categories and batch generation (23 Oct 2026)"),
+        bullets([
+            "A Category box in the Studio: images go to outputs/<category>/ instead of outputs/, the generations row carries the category, and the prompt is stored under the category in the new prompt_library table (created_at, category, prompt, kind, source, generation_id). History filters by category and shows it as a column; db.py categories / db.py prompts <category> print them.",
+            "batch.py: generates a whole category through the running app's /generate endpoint (so every image has the usual telemetry), from a built-in prompt set (Nature: 50 prompts) or a text file, cycling prompts with fresh seeds; --model, --seed-start, --negative, --url, --list.",
+            "Verified: 50 Nature images with Z-Image Turbo in one batch, saved to outputs/Nature/ and listed under the category in both tables.",
+        ]),
         H3("Documentation 2.2 (22 Oct 2026)"),
         bullets(["This document set: new section 10 (Video and Music), later sections renumbered, module reference for media.py, media_ui.py and video_io.py, requirements FR-26 to FR-29 and NFR-13 to NFR-14, workflows 4.14 and 4.15, database columns, change log."]),
         H2("14.2 Roadmap", "s14-2"),
@@ -1506,6 +1536,8 @@ def sec_appendix():
         P("All commands run from the project folder in PowerShell with `.\\.venv\\Scripts\\python.exe`."),
         table(["Task", "Command"], [
             ["Start the app", "app.py"],
+            ["Generate a category in batch through the app", "batch.py --category Nature --count 50   (--prompts file.txt, --model, --seed-start, --list)"],
+            ["Categories and stored prompts", "db.py categories   ·   db.py prompts Nature"],
             ["List models", "generate.py --list-models"],
             ["Generate from CLI", "generate.py \"prompt\" --model juggernaut --seed 42 --count 2"],
             ["Generate with a LoRA", "generate.py \"prompt\" --model dreamshaper --lora name:0.8"],
