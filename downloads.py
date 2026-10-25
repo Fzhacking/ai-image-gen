@@ -561,6 +561,9 @@ def _repo_patterns(spec: ModelSpec) -> tuple[list[str] | None, list[str]]:
             ignore += ["*.fp16.*"]
     if spec.family == "qwen":
         ignore += ["text_encoder/*"]   # the 4-bit text encoder comes from diffusers/qwen-image-nf4 instead
+    if spec.family == "flux":
+        # the loader reads the diffusers folders; skip the duplicate single-file checkpoint and VAE (~24 GB)
+        ignore += ["flux1-*.safetensors", "ae.safetensors"]
     if spec.family in ("video", "music"):
         import media
         allow = media.repo_allow_patterns(spec)

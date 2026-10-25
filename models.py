@@ -445,7 +445,9 @@ class ModelManager:
             vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
             if vram_gb >= 40:
                 return FluxPipeline.from_pretrained(spec.source, torch_dtype=dtype).to(self.device)
-            # 24 GB cards: 4-bit transformer + 8-bit T5, with per-model CPU offload.
+            # 24 GB cards: 4-bit transformer + 8-bit T5, all on the GPU (~14.5 GB peak at 1344x768).
+            # Model CPU offload made every image ~13x slower (84 s vs 6.6 s on an RTX 3090): moving
+            # bitsandbytes weights between RAM and VRAM each call costs far more than it saves.
             from diffusers import BitsAndBytesConfig as DiffBnb, FluxTransformer2DModel
             from transformers import BitsAndBytesConfig as TfBnb, T5EncoderModel
             log("FLUX on <40 GB VRAM: quantising transformer to 4-bit and T5 to 8-bit ...")
@@ -461,8 +463,7 @@ class ModelManager:
             pipe = FluxPipeline.from_pretrained(
                 spec.source, transformer=transformer, text_encoder_2=text_encoder_2, torch_dtype=dtype,
             )
-            pipe.enable_model_cpu_offload()
-            return pipe
+            return pipe.to(self.device)
         except (GatedRepoError, OSError) as e:  # diffusers wraps the 401 in an OSError
             raise RuntimeError(
                 "FLUX.1 [schnell] is gated on Hugging Face and no login token is stored. Accept the terms at "
