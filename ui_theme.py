@@ -200,6 +200,63 @@ button.secondary {{ font-weight: 600; }}
 .fz-section {{ border: 1px solid {BORDER}; border-radius: 14px; padding: 10px 14px 6px; background: {SURFACE}; }}
 .fz-kv table {{ width: 100%; }}
 .fz-kv td:first-child {{ color: {MUTED}; white-space: nowrap; width: 200px; }}
+
+/* responsive layout and interaction polish */
+.gradio-container, .gradio-container * {{ box-sizing: border-box; }}
+.gradio-container {{ min-width: 0; padding-inline: clamp(12px, 2.5vw, 28px) !important; }}
+.gradio-container .row > .column, .gradio-container .row > .block {{ min-width: 0; }}
+.gradio-container .tabs > .tab-nav {{ max-width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: thin; }}
+.gradio-container .tab-nav button {{ flex: 0 0 auto; white-space: nowrap; }}
+.gradio-container button:focus-visible, .gradio-container a:focus-visible {{ outline: 2px solid {ACCENT_2}; outline-offset: 2px; }}
+.fz-header {{ flex-wrap: wrap; }}
+.fz-sys {{ min-width: 0; }}
+.fz-empty {{ padding: clamp(20px, 4vw, 40px) clamp(14px, 3vw, 24px); }}
+.fz-kv td:first-child {{ width: min(40%, 200px); white-space: normal; overflow-wrap: anywhere; }}
+.fz-admin-head {{ flex-wrap: wrap; gap: 4px 14px; }}
+.gradio-container [data-testid="dataframe"] {{ max-width: 100%; overflow-x: auto; }}
+.gradio-container .gallery .grid-wrap {{ grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important; }}
+.gradio-container .gallery {{ height: min(640px, 66vh) !important; min-height: 280px; }}
+
+@media (max-width: 900px) {{
+  .gradio-container {{ padding-bottom: 20px !important; }}
+  .gradio-container .row {{ flex-wrap: wrap; }}
+  .gradio-container .row > .column {{ flex: 1 1 100% !important; min-width: 0 !important; }}
+  .fz-header {{ align-items: flex-start; }}
+  .fz-sys {{ justify-content: flex-start; }}
+  .fz-kv td:first-child {{ width: 36%; }}
+}}
+
+@media (max-width: 640px) {{
+  .gradio-container {{ padding-inline: 12px !important; }}
+  .fz-header {{ gap: 10px; padding: 12px 0; }}
+  .fz-brand {{ gap: 9px; }}
+  .fz-mark {{ width: 36px; height: 36px; border-radius: 10px; font-size: 18px; }}
+  .fz-logo {{ font-size: 22px; }}
+  .fz-tag {{ font-size: 12px; }}
+  .fz-sys {{ justify-content: flex-start; gap: 6px; }}
+  .fz-pill {{ font-size: 10.5px; padding: 5px 8px; }}
+  .gradio-container .row:not(.fz-chips) > .block {{ flex: 1 1 calc(50% - 8px) !important; min-width: 0 !important; }}
+  .gradio-container .row.fz-upscale > .block {{ flex: 1 1 100% !important; }}
+  .gradio-container button {{ min-height: 40px; }}
+  .fz-chips button {{ min-height: 38px !important; height: auto !important; padding: 6px 10px !important; }}
+  .gradio-container .gallery {{ height: min(420px, 52vh) !important; min-height: 220px; }}
+  .gradio-container .gallery .grid-wrap {{ grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)) !important; }}
+  .fz-tile {{ min-height: 84px; padding: 10px 11px; }}
+  .fz-tile .v {{ font-size: 21px; }}
+  .fz-job {{ padding: 10px; }}
+  .fz-job .r {{ flex-wrap: wrap; }}
+  .fz-kv td:first-child {{ width: 34%; }}
+}}
+
+@media (max-width: 420px) {{
+  .gradio-container .row:not(.fz-chips):not(.fz-upscale) > .block {{ flex-basis: 100% !important; }}
+  .fz-logo {{ font-size: 20px; }}
+  .fz-pill {{ white-space: normal; }}
+}}
+
+@media (prefers-reduced-motion: reduce) {{
+  .gradio-container *, .gradio-container *::before, .gradio-container *::after {{ scroll-behavior: auto !important; transition-duration: 0.01ms !important; }}
+}}
 """
 
 
