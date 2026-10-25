@@ -11,6 +11,7 @@ Environment (used by the Docker image, optional otherwise):
     FRAZILE_NO_BROWSER       set to 1 to not open a browser tab on start
     FRAZILE_STARTUP_MODEL    model key to load at start (overrides the Admin setting; "none" = load on first use)
     FRAZILE_ADMIN_PASSWORD   if set, destructive Admin actions need this password (Admin > Settings)
+    FRAZILE_AUTH_USERNAME    if set, the UI needs a login: password, then an emailed code (see auth.py)
 
 Everything is controlled from the prompt. Examples:
     "a cozy cabin in a snowy forest, 16:9, 4k"
@@ -24,6 +25,7 @@ Tabs:
     Studio     prompt, quick chips, model and LoRA boxes, results, upscale bar (2K/4K/8K with Real-ESRGAN)
     Video      text/image-to-video with LTX-Video or Wan 2.1, frame-wise upscale to Full HD/2K/4K, soundtrack (media_ui.py)
     Music      text-to-music with MusicGen (media_ui.py)
+               (Video and Music are commented out for now, see the tabs below)
     History    every generation (images, videos, tracks) from generations.db: filters, thumbnails, reuse, delete
     Admin      models and LoRAs management, downloads, system stats, settings, logs (admin_ui.py)
 """
@@ -48,6 +50,7 @@ import torch
 from PIL import Image
 
 import admin_ui
+import auth
 import db
 import gpu_info
 import media
@@ -187,7 +190,22 @@ def trigger_hints(s: Settings) -> list[str]:
     return hints
 
 
-def preview(prompt: str, choice: str, loras_ui: list[str] | None = None) -> str:
+def apply_ui_steps(s: Settings, spec: ModelSpec, steps_ui: int | None) -> None:
+    """The Steps slider (Z-Image Turbo only) replaces the model default; '30 steps' in the prompt still wins."""
+    if spec.family == "zimage" and steps_ui and not s.steps_explicit:
+        s.steps = max(1, min(100, int(steps_ui)))
+
+
+def zimage_selected(prompt: str, choice: str, loras_ui: list[str] | None = None) -> bool:
+    try:
+        s = parse(prompt or "")
+        add_ui_loras(s, loras_ui)
+        return pick_model(s, choice)[0].family == "zimage"
+    except (gr.Error, KeyError):
+        return False
+
+
+def preview(prompt: str, choice: str, loras_ui: list[str] | None = None, steps_ui: int | None = None) -> str:
     """Live 'interpreted as' line shown under the prompt box."""
     if not prompt.strip():
         return ""
@@ -198,6 +216,7 @@ def preview(prompt: str, choice: str, loras_ui: list[str] | None = None) -> str:
     except gr.Error as e:
         return f"**{e}**"
     s.apply_defaults(spec.steps, spec.guidance)
+    apply_ui_steps(s, spec, steps_ui)
     if note:
         s.notes.append(note)
     line = f"**Will generate:** {s.summary()}  ·  model **{spec.name}**"
@@ -211,6 +230,11 @@ def preview(prompt: str, choice: str, loras_ui: list[str] | None = None) -> str:
     if s.notes:
         line += f"  \n<small>{' · '.join(s.notes)}</small>"
     return line
+
+
+def preview_and_steps(prompt: str, choice: str, loras_ui: list[str] | None = None, steps_ui: int | None = None):
+    """Preview line plus the Steps slider, which only shows while Z-Image Turbo is the model that would run."""
+    return preview(prompt, choice, loras_ui, steps_ui), gr.update(visible=zimage_selected(prompt, choice, loras_ui))
 
 
 def details_markdown(rec: dict) -> str:
@@ -292,7 +316,7 @@ def category_choices() -> list[str]:
 
 
 def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] | None = None, category: str = "",
-             progress=gr.Progress()):
+             steps_ui: int | None = None, progress=gr.Progress()):
     if not prompt.strip():
         raise gr.Error("Please enter a prompt.")
     category = safe_category(category)
@@ -306,6 +330,7 @@ def generate(prompt: str, negative: str, model_choice: str, loras_ui: list[str] 
         s.notes.append(auto_note)
         gr.Info(auto_note)
     s.apply_defaults(spec.steps, spec.guidance)
+    apply_ui_steps(s, spec, steps_ui)
     negative = (negative.strip() or default_negative()) if spec.negative else ""
 
     with MANAGER.lock:
@@ -648,8 +673,10 @@ def reuse_prompt(row_id: int | None, with_seed: bool):
         prompt = f"{prompt}, seed {rec['seed']}"
     if with_seed and kind != "image":
         gr.Info(f"Seed {rec['seed']}: enter it in the Seed box of the {kind.capitalize()} tab")
-    tab = {"image": "studio", "video": "video", "music": "music"}[kind]
     keep = gr.update()
+    if kind != "image":   # the Video and Music tabs are commented out for now
+        raise gr.Error(f"{kind.capitalize()} generation is turned off for now.")
+    tab = {"image": "studio", "video": "video", "music": "music"}[kind]
     return (prompt if kind == "image" else keep, prompt if kind == "video" else keep, prompt if kind == "music" else keep,
             gr.Tabs(selected=tab))
 
@@ -696,6 +723,12 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
                         info="Or name it in the prompt: 'model juggernaut'. Switching takes ~25 s (longer for Z-Image and Qwen); the first use of a model downloads it.",
                     )
                     loaded_md = gr.Markdown(loaded_line(MANAGER, UPSCALER.name, MEDIA), elem_classes=["fz-loaded"])
+                    # a Number, not a Slider: Gradio's Slider fails on an emptied box, a Number passes None (= model default)
+                    zimage_steps = gr.Number(
+                        value=models.resolve("zimage").steps, minimum=1, maximum=50, step=1, precision=0,
+                        label="Steps (Z-Image Turbo)", visible=zimage_selected("", "auto"),
+                        info="1-50, default 8 (empty = default); more steps add detail but take longer. '30 steps' in the prompt overrides this.",
+                    )
                     lora_choice = gr.Dropdown(
                         lora_choices(), multiselect=True, label="LoRAs", allow_custom_value=True,
                         info="Each LoRA applies at its own default weight (Admin › LoRAs); write <lora:name:1.2> in the prompt for another. "
@@ -728,11 +761,11 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
             last_records = gr.State([])
             selected_index = gr.State(None)
 
-            preview_inputs = [prompt, model_choice, lora_choice]
-            prompt.change(preview, preview_inputs, interpreted, show_progress="hidden")
-            model_choice.change(preview, preview_inputs, interpreted, show_progress="hidden")
-            lora_choice.change(preview, preview_inputs, interpreted, show_progress="hidden")
-            gen_inputs = [prompt, negative, model_choice, lora_choice, category_box]
+            preview_inputs = [prompt, model_choice, lora_choice, zimage_steps]
+            for trigger in (prompt.change, model_choice.change, lora_choice.change):
+                trigger(preview_and_steps, preview_inputs, [interpreted, zimage_steps], show_progress="hidden")
+            zimage_steps.change(preview, preview_inputs, interpreted, show_progress="hidden")
+            gen_inputs = [prompt, negative, model_choice, lora_choice, category_box, zimage_steps]
             gen_outputs = [gallery, details, last_records, selected_index, upscale_bar, upscale_note, loaded_md, empty_state]
             run.click(generate, gen_inputs, gen_outputs, concurrency_id="gpu")
             prompt.submit(generate, gen_inputs, gen_outputs, concurrency_id="gpu")
@@ -766,14 +799,16 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
                 inputs=[prompt],
             )
 
-        with gr.Tab("Video", id="video") as video_tab:
-            video_ui = media_ui.build_video_tab(loaded_md)
-            video_tab.select(media_ui.refresh_video_choices, [video_ui.model, video_ui.track], [video_ui.model, video_ui.track],
-                             show_progress="hidden")
-
-        with gr.Tab("Music", id="music") as music_tab:
-            music_ui = media_ui.build_music_tab(loaded_md)
-            music_tab.select(media_ui.refresh_music_choices, [music_ui.model], [music_ui.model], show_progress="hidden")
+        # Video and Music generation are off for now (their models were deleted); uncomment to bring the tabs back
+        # with gr.Tab("Video", id="video") as video_tab:
+        #     video_ui = media_ui.build_video_tab(loaded_md)
+        #     video_tab.select(media_ui.refresh_video_choices, [video_ui.model, video_ui.track], [video_ui.model, video_ui.track],
+        #                      show_progress="hidden")
+        #
+        # with gr.Tab("Music", id="music") as music_tab:
+        #     music_ui = media_ui.build_music_tab(loaded_md)
+        #     music_tab.select(media_ui.refresh_music_choices, [music_ui.model], [music_ui.model], show_progress="hidden")
+        video_prompt, music_prompt = gr.State(""), gr.State("")   # stand-ins for the hidden tabs' prompt boxes
 
         with gr.Tab("History", id="history") as history_tab:
             stats_md = gr.Markdown(history_stats())
@@ -822,7 +857,7 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
             h_category.input(refresh_history, h_filters, h_outputs)
             table.select(select_history, [table], h_preview)
             thumbs.select(select_history_thumb, None, h_preview)
-            reuse_targets = [prompt, video_ui.prompt, music_ui.prompt, tabs]
+            reuse_targets = [prompt, video_prompt, music_prompt, tabs]
             h_reuse.click(lambda i: reuse_prompt(i, False), [h_selected], reuse_targets)
             h_reuse_seed.click(lambda i: reuse_prompt(i, True), [h_selected], reuse_targets)
             h_delete.click(delete_history, [h_selected, h_del_files, *h_filters], [table, thumbs, stats_md, *h_preview])
@@ -836,12 +871,27 @@ with gr.Blocks(title="Frazile AI · Image Studio (images, video, music)", fill_w
 if __name__ == "__main__":
     in_docker = os.environ.get("FRAZILE_IN_DOCKER") == "1"
     demo.queue(default_concurrency_limit=1)
-    demo.launch(
-        server_name=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"),
-        server_port=int(os.environ.get("GRADIO_SERVER_PORT", "7860")),
-        inbrowser=not in_docker and os.environ.get("FRAZILE_NO_BROWSER") != "1",
-        theme=build_theme(),
-        css=CSS,
-        max_file_size="8gb",
-        allowed_paths=[str(OUTPUT_DIR), str(THUMB_DIR)],
-    )
+    host = os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1")
+    port = int(os.environ.get("GRADIO_SERVER_PORT", "7860"))
+    if auth.enabled():
+        # login page in front of the whole UI and API (auth.py); Gradio is mounted inside our own FastAPI app
+        import uvicorn
+        from fastapi import FastAPI
+
+        auth.check_config()
+        server = FastAPI()
+        auth.install(server)
+        server = gr.mount_gradio_app(server, demo, path="/", auth_dependency=auth.session_user, theme=build_theme(),
+                                     css=CSS, max_file_size="8gb", allowed_paths=[str(OUTPUT_DIR), str(THUMB_DIR)])
+        print(f"Login is on (user {os.environ['FRAZILE_AUTH_USERNAME']}); serving on http://{host}:{port}")
+        uvicorn.run(server, host=host, port=port, proxy_headers=True, forwarded_allow_ips="*")
+    else:
+        demo.launch(
+            server_name=host,
+            server_port=port,
+            inbrowser=not in_docker and os.environ.get("FRAZILE_NO_BROWSER") != "1",
+            theme=build_theme(),
+            css=CSS,
+            max_file_size="8gb",
+            allowed_paths=[str(OUTPUT_DIR), str(THUMB_DIR)],
+        )

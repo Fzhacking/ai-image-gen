@@ -25,3 +25,7 @@ models/cache/
 # Admin panel registry (models, LoRAs, settings) is local data
 models/registry.json
 models/registry.json.tmp
+
+# Login session signing key (auth.py) and docker compose secrets
+models/auth_secret.key
+.env

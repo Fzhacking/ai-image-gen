@@ -9,9 +9,18 @@ services:
       - ./outputs:/app/outputs                 # generated images
       - ./models:/app/models                   # Real-ESRGAN weights, your checkpoints and LoRAs
       - ./generations.db:/app/generations.db   # history database (create an empty file first on Linux)
-      - hf-cache:/cache/huggingface            # downloaded models (tens of GB; kept between rebuilds)
+      # downloaded models and the saved Hugging Face token: share the host's cache instead of downloading
+      # everything again into a Docker volume (USERPROFILE on Windows; set it to $HOME on Linux)
+      - ${USERPROFILE:-~}/.cache/huggingface:/cache/huggingface
     environment:
       - HF_TOKEN=${HF_TOKEN:-}                 # optional: Hugging Face token so FLUX can download
+      - FRAZILE_ADMIN_PASSWORD=${FRAZILE_ADMIN_PASSWORD:-}   # set this before exposing the app on a domain
+      # login (auth.py): username + password, then a code emailed through Resend; set them in .env
+      - FRAZILE_AUTH_USERNAME=${FRAZILE_AUTH_USERNAME:-}
+      - FRAZILE_AUTH_PASSWORD=${FRAZILE_AUTH_PASSWORD:-}
+      - FRAZILE_AUTH_EMAIL=${FRAZILE_AUTH_EMAIL:-}
+      - FRAZILE_OTP_FROM=${FRAZILE_OTP_FROM:-}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
     deploy:
       resources:
         reservations:
@@ -21,6 +30,3 @@ services:
               capabilities: [gpu]
     shm_size: "2gb"
     restart: unless-stopped
-
-volumes:
-  hf-cache:
